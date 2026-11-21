@@ -25,7 +25,7 @@ export const dailyRecordCreateSchema = z
   )
   .refine(
     (value) => value.feedLeftKg <= value.feedGivenKg,
-    "Feed left cannot exceed feed given.",
+    "Feed left over after feeding cannot exceed feed given.",
   );
 
 export const dailyRecordListQuerySchema = z.object({

@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { dailyRecordCreateSchema } from "@/lib/validation/daily-records";
 
 type Farm = {
   id: string;
@@ -40,7 +41,19 @@ type DailyRecord = {
   feed_given_kg: number;
   feed_left_kg: number;
   water_liters: number;
+  temp_min_c: number | null;
+  temp_max_c: number | null;
+  litter: string | null;
+  remarks: string | null;
   initials: string | null;
+};
+
+type FarmBatch = {
+  id: string;
+  batch_code: string;
+  batch_type: "Broiler" | "Kienyeji";
+  house: string | null;
+  status: "running" | "closed";
 };
 
 type FarmSummary = {
@@ -59,6 +72,33 @@ type DashboardPayload = {
 };
 
 type Tab = "overview" | "batches" | "daily";
+const TAB_CHANGE_EVENT = "flockledger-tab-change";
+
+function subscribeToTabChanges(onChange: () => void) {
+  window.addEventListener("popstate", onChange);
+  window.addEventListener(TAB_CHANGE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("popstate", onChange);
+    window.removeEventListener(TAB_CHANGE_EVENT, onChange);
+  };
+}
+
+function getTabFromLocation(): Tab {
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab === "batches" || tab === "daily" ? tab : "overview";
+}
+
+function getServerTabSnapshot(): Tab {
+  return "overview";
+}
+
+function navigateToTab(tab: Tab) {
+  const url = new URL(window.location.href);
+  if (tab === "overview") url.searchParams.delete("tab");
+  else url.searchParams.set("tab", tab);
+  window.history.pushState(null, "", url);
+  window.dispatchEvent(new Event(TAB_CHANGE_EVENT));
+}
 
 class RequestError extends Error {
   status: number;
@@ -167,13 +207,20 @@ export default function FlockLedgerApp() {
   const [authNotice, setAuthNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [farms, setFarms] = useState<Farm[]>([]);
+  const [farmBatches, setFarmBatches] = useState<FarmBatch[]>([]);
   const [farmId, setFarmId] = useState("");
   const [farmError, setFarmError] = useState("");
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
   const [dailyRecords, setDailyRecords] = useState<DailyRecord[]>([]);
-  const [tab, setTab] = useState<Tab>("overview");
+  const tab = useSyncExternalStore(
+    subscribeToTabChanges,
+    getTabFromLocation,
+    getServerTabSnapshot,
+  );
   const [dialog, setDialog] = useState<"batch" | "daily" | "farm" | null>(null);
   const [dialogError, setDialogError] = useState("");
+  const [dailyBatchId, setDailyBatchId] = useState("");
+  const [dailyRecordDate, setDailyRecordDate] = useState("");
   const [feedback, setFeedback] = useState("");
   const [pageError, setPageError] = useState("");
   const [loadingDashboard, setLoadingDashboard] = useState(true);
@@ -181,7 +228,11 @@ export default function FlockLedgerApp() {
 
   const activeFarm = farms.find((farm) => farm.id === farmId) ?? null;
   const batches = useMemo(() => dashboard?.data ?? [], [dashboard]);
-  const runningBatches = batches.filter((batch) => batch.status === "running");
+  const runningBatches = farmBatches.filter((batch) => batch.status === "running");
+  const existingDailyRecord = dailyRecords.find(
+    (record) => record.batch_id === dailyBatchId && record.record_date === dailyRecordDate,
+  );
+  const canEditRecords = activeFarm?.role === "owner" || activeFarm?.role === "manager";
   const batchNames = useMemo(
     () => new Map(batches.map((batch) => [batch.batch_id, batch.batch_code])),
     [batches],
@@ -190,6 +241,10 @@ export default function FlockLedgerApp() {
   function openDialog(nextDialog: "batch" | "daily" | "farm") {
     setDialogError("");
     setFarmError("");
+    if (nextDialog === "daily") {
+      setDailyBatchId("");
+      setDailyRecordDate(todayInNairobi());
+    }
     setDialog(nextDialog);
   }
 
@@ -198,6 +253,9 @@ export default function FlockLedgerApp() {
     const payload = await request<{ data: unknown[] }>("/api/farms");
     const loadedFarms = payload.data.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
     setFarms(loadedFarms);
+    setFarmBatches([]);
+    setDailyRecords([]);
+    setDashboard(null);
     setFarmId((current) =>
       loadedFarms.some((farm) => farm.id === current) ? current : loadedFarms[0]?.id ?? "",
     );
@@ -231,27 +289,46 @@ export default function FlockLedgerApp() {
 
   const refreshDashboard = useCallback(async (selectedFarmId: string) => {
     const requestId = ++dashboardRequestId.current;
-    try {
-      const [dashboardResult, dailyResult] = await Promise.all([
-        request<DashboardPayload>(
-          `/api/dashboard?farmId=${encodeURIComponent(selectedFarmId)}`,
-        ),
-        request<{ data: DailyRecord[] }>(
-          `/api/daily-records?farmId=${encodeURIComponent(selectedFarmId)}`,
-        ),
-      ]);
-      if (requestId === dashboardRequestId.current) {
-        setDashboard(dashboardResult);
-        setDailyRecords(dailyResult.data);
-        setPageError("");
-      }
-    } catch (error) {
-      if (requestId === dashboardRequestId.current) {
-        setPageError(error instanceof Error ? error.message : "Could not load farm data.");
-      }
-    } finally {
-      if (requestId === dashboardRequestId.current) setLoadingDashboard(false);
+    const [dashboardResult, batchesResult, dailyResult] = await Promise.allSettled([
+      request<DashboardPayload>(
+        `/api/dashboard?farmId=${encodeURIComponent(selectedFarmId)}`,
+      ),
+      request<{ data: FarmBatch[] }>(
+        `/api/batches?farmId=${encodeURIComponent(selectedFarmId)}`,
+      ),
+      request<{ data: DailyRecord[] }>(
+        `/api/daily-records?farmId=${encodeURIComponent(selectedFarmId)}`,
+      ),
+    ]);
+    if (requestId !== dashboardRequestId.current) return;
+
+    const errors: string[] = [];
+    if (dashboardResult.status === "fulfilled") {
+      setDashboard(dashboardResult.value);
+    } else {
+      setDashboard(null);
+      errors.push(dashboardResult.reason instanceof Error
+        ? dashboardResult.reason.message
+        : "Could not load farm performance.");
     }
+    if (batchesResult.status === "fulfilled") {
+      setFarmBatches(batchesResult.value.data);
+    } else {
+      setFarmBatches([]);
+      errors.push(batchesResult.reason instanceof Error
+        ? batchesResult.reason.message
+        : "Could not load farm batches.");
+    }
+    if (dailyResult.status === "fulfilled") {
+      setDailyRecords(dailyResult.value.data);
+    } else {
+      setDailyRecords([]);
+      errors.push(dailyResult.reason instanceof Error
+        ? dailyResult.reason.message
+        : "Could not load daily records.");
+    }
+    setPageError(errors[0] ?? "");
+    setLoadingDashboard(false);
   }, []);
 
   useEffect(() => {
@@ -302,6 +379,7 @@ export default function FlockLedgerApp() {
       await request("/api/auth/sign-out", { method: "POST" });
       setAuthenticated(false);
       setFarms([]);
+      setFarmBatches([]);
       setFarmId("");
       setDashboard(null);
       setDailyRecords([]);
@@ -368,7 +446,6 @@ export default function FlockLedgerApp() {
   async function handleDailyCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!activeFarm) return;
-    setBusy(true);
     setFeedback("");
     setPageError("");
     const form = new FormData(event.currentTarget);
@@ -376,9 +453,7 @@ export default function FlockLedgerApp() {
       const value = String(form.get(key) ?? "").trim();
       return value ? Number(value) : null;
     };
-    const body = {
-      farmId: activeFarm.id,
-      batchId: String(form.get("batchId") ?? ""),
+    const changes = {
       recordDate: String(form.get("recordDate") ?? ""),
       dead: Number(form.get("dead") || 0),
       culled: Number(form.get("culled") || 0),
@@ -387,13 +462,39 @@ export default function FlockLedgerApp() {
       waterLiters: Number(form.get("waterLiters") || 0),
       tempMinC: nullableNumber("tempMinC"),
       tempMaxC: nullableNumber("tempMaxC"),
+      litter: String(form.get("litter") ?? "").trim() || null,
       initials: String(form.get("initials") ?? "").trim() || null,
       remarks: String(form.get("remarks") ?? "").trim() || null,
     };
+    const body = {
+      farmId: activeFarm.id,
+      batchId: String(form.get("batchId") ?? ""),
+      ...changes,
+    };
+    const parsedBody = dailyRecordCreateSchema.safeParse(body);
+    if (!parsedBody.success) {
+      setDialogError(parsedBody.error.issues.map((issue) => issue.message).join(" "));
+      return;
+    }
+    const existing = dailyRecords.find(
+      (record) => record.batch_id === body.batchId && record.record_date === body.recordDate,
+    );
+    setBusy(true);
     try {
-      await request("/api/daily-records", { method: "POST", body: JSON.stringify(body) });
+      if (existing) {
+        if (!canEditRecords) {
+          setDialogError("A daily record already exists for this batch and date. Ask a farm manager to update it.");
+          return;
+        }
+        await request(`/api/records/daily-records/${existing.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ farmId: activeFarm.id, changes }),
+        });
+      } else {
+        await request("/api/daily-records", { method: "POST", body: JSON.stringify(body) });
+      }
       setDialog(null);
-      setFeedback("Daily record saved.");
+      setFeedback(existing ? "Daily record updated and audit logged." : "Daily record saved.");
       await refreshDashboard(activeFarm.id);
     } catch (error) {
       setDialogError(error instanceof Error ? error.message : "Could not save daily record.");
@@ -500,12 +601,13 @@ export default function FlockLedgerApp() {
                 dashboardRequestId.current += 1;
                 setLoadingDashboard(true);
                 setDashboard(null);
+                setFarmBatches([]);
                 setDailyRecords([]);
                 setFarmId(event.target.value);
               }}>
                 {farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}
               </select>
-              <span className="select-chevron">⌄</span>
+              <span className="select-chevron" aria-hidden="true" />
             </label>
           ) : (
             <button className="farm-picker add-farm-picker" type="button" onClick={() => openDialog("farm")}>
@@ -521,7 +623,7 @@ export default function FlockLedgerApp() {
             ["batches", "Flock batches", "batch"],
             ["daily", "Daily records", "daily"],
           ] as const).map(([id, label, icon]) => (
-            <button className={`nav-link ${tab === id ? "active" : ""}`} type="button" key={id} onClick={() => setTab(id)}>
+            <button className={`nav-link ${tab === id ? "active" : ""}`} type="button" key={id} onClick={() => navigateToTab(id)}>
               <span className="nav-icon"><Icon name={icon} /></span>{label}
               {id === "batches" && runningBatches.length > 0 && <span className="nav-count">{runningBatches.length}</span>}
             </button>
@@ -573,7 +675,7 @@ export default function FlockLedgerApp() {
               dailyRecords={dailyRecords}
               batchNames={batchNames}
               loading={loadingDashboard}
-              onTabChange={setTab}
+              onTabChange={navigateToTab}
               onAddDaily={() => openDialog("daily")}
             />
           ) : tab === "batches" ? (
@@ -586,11 +688,12 @@ export default function FlockLedgerApp() {
 
       {dialog && (
         <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDialog(null); }}>
-          <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+          <section className={`dialog-card ${dialog === "daily" ? "daily-dialog-card" : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
             <div className="dialog-heading">
               <div>
                 <p className="eyebrow">{dialog === "farm" ? "FARM SETUP" : dialog === "batch" ? "FLOCK MANAGEMENT" : "DAILY HOUSE LOG"}</p>
                 <h2 id="dialog-title">{dialog === "farm" ? "Create a farm" : dialog === "batch" ? "Start a new batch" : "Record today’s activity"}</h2>
+                {dialog === "daily" && <p className="dialog-description">Choose a flock and date, then record what happened in the house.</p>}
               </div>
               <button className="dialog-close" type="button" aria-label="Close dialog" onClick={() => setDialog(null)}>×</button>
             </div>
@@ -617,23 +720,62 @@ export default function FlockLedgerApp() {
                 <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Saving…" : "Create batch"}</button></div>
               </form>
             ) : (
-              <form className="form-stack dialog-form" onSubmit={handleDailyCreate}>
-                <div className="form-grid">
-                  <label className="field-span">Batch<select name="batchId" required defaultValue=""><option value="" disabled>Select a running batch</option>{runningBatches.map((batch) => <option key={batch.batch_id} value={batch.batch_id}>{batch.batch_code} · {batch.batch_type}</option>)}</select></label>
-                  <label>Date<input name="recordDate" type="date" required defaultValue={todayInNairobi()} /></label>
-                  <label>Feed given <span className="field-note">kg</span><input name="feedGivenKg" type="number" min="0" step="0.001" defaultValue="0" /></label>
-                  <label>Feed left <span className="field-note">kg</span><input name="feedLeftKg" type="number" min="0" step="0.001" defaultValue="0" /></label>
-                  <label>Water <span className="field-note">L</span><input name="waterLiters" type="number" min="0" step="0.001" defaultValue="0" /></label>
-                  <label>Deaths<input name="dead" type="number" min="0" step="1" defaultValue="0" /></label>
-                  <label>Culled<input name="culled" type="number" min="0" step="1" defaultValue="0" /></label>
-                  <label>Min. temperature <span className="field-note">°C</span><input name="tempMinC" type="number" min="-20" max="80" step="0.1" /></label>
-                  <label>Max. temperature <span className="field-note">°C</span><input name="tempMaxC" type="number" min="-20" max="80" step="0.1" /></label>
-                  <label>Initials<input name="initials" maxLength={16} placeholder="Optional" /></label>
-                  <label className="field-span">Notes<input name="remarks" maxLength={2000} placeholder="Anything to note about today?" /></label>
+              <form
+                key={existingDailyRecord?.id ?? "new-daily-record"}
+                className="form-stack dialog-form daily-record-form"
+                onSubmit={handleDailyCreate}
+              >
+                <div className="daily-form-scroll">
+                  <div className="daily-form-layout">
+                  <section className="daily-form-section flock-section">
+                    <div className="form-section-heading"><span>01</span><div><h3>Flock and date</h3><p>One daily log per batch, per date.</p></div></div>
+                    <div className="form-grid">
+                      <label>Active batch<select name="batchId" required value={dailyBatchId} onChange={(event) => setDailyBatchId(event.target.value)}><option value="" disabled>Select a running batch</option>{runningBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.batch_code} · {batch.batch_type}{batch.house ? ` · ${batch.house}` : ""}</option>)}</select></label>
+                      <label>Date<input name="recordDate" type="date" required value={dailyRecordDate} onChange={(event) => setDailyRecordDate(event.target.value)} /></label>
+                    </div>
+                  </section>
+                  <section className="daily-form-section">
+                    <div className="form-section-heading"><span>02</span><div><h3>Flock count</h3><p>Losses recorded for this day.</p></div></div>
+                    <div className="form-grid">
+                      <label>Deaths<input name="dead" type="number" min="0" step="1" defaultValue={existingDailyRecord?.dead ?? 0} /></label>
+                      <label>Culled<input name="culled" type="number" min="0" step="1" defaultValue={existingDailyRecord?.culled ?? 0} /></label>
+                    </div>
+                  </section>
+                  <section className="daily-form-section">
+                    <div className="form-section-heading"><span>03</span><div><h3>Feed and water</h3><p>Feed consumed = given − left over.</p></div></div>
+                    <div className="form-grid form-grid-three">
+                      <label>Feed given <span className="field-note">kg</span><input name="feedGivenKg" type="number" min="0" step="0.001" defaultValue={existingDailyRecord?.feed_given_kg ?? 0} /></label>
+                      <label>Feed left over after feeding <span className="field-note">kg</span><input name="feedLeftKg" type="number" min="0" step="0.001" defaultValue={existingDailyRecord?.feed_left_kg ?? 0} /></label>
+                      <label>Water <span className="field-note">litres</span><input name="waterLiters" type="number" min="0" step="0.001" defaultValue={existingDailyRecord?.water_liters ?? 0} /></label>
+                    </div>
+                  </section>
+                  <section className="daily-form-section">
+                    <div className="form-section-heading"><span>04</span><div><h3>House conditions</h3><p>Temperature and litter.</p></div></div>
+                    <div className="form-grid">
+                      <label>Min. temperature <span className="field-note">°C</span><input name="tempMinC" type="number" min="-20" max="80" step="0.1" defaultValue={existingDailyRecord?.temp_min_c ?? ""} /></label>
+                      <label>Max. temperature <span className="field-note">°C</span><input name="tempMaxC" type="number" min="-20" max="80" step="0.1" defaultValue={existingDailyRecord?.temp_max_c ?? ""} /></label>
+                      <label className="field-span">Litter condition<input name="litter" maxLength={128} placeholder="e.g. Dry, slightly damp" defaultValue={existingDailyRecord?.litter ?? ""} /></label>
+                    </div>
+                  </section>
+                  <section className="daily-form-section notes-section">
+                    <div className="form-section-heading"><span>05</span><div><h3>Notes</h3><p>Optional observations.</p></div></div>
+                    <div className="form-grid">
+                      <label>Recorded by <span className="field-note">initials</span><input name="initials" maxLength={16} placeholder="Optional" defaultValue={existingDailyRecord?.initials ?? ""} /></label>
+                      <label className="field-span">Observations<input name="remarks" maxLength={2000} placeholder="Anything to note about today?" defaultValue={existingDailyRecord?.remarks ?? ""} /></label>
+                    </div>
+                  </section>
+                  </div>
+                  {existingDailyRecord && (
+                    <div className={`record-exists-note ${canEditRecords ? "editable" : ""}`} role="status">
+                      {canEditRecords
+                        ? "A log already exists for this batch and date. Saving changes will add an audit entry."
+                        : "A log already exists for this batch and date. Ask a farm owner or manager to update it."}
+                    </div>
+                  )}
+                  {!runningBatches.length && <p className="inline-error">There are no running batches to record against. Create a batch first.</p>}
+                  {dialogError && <p className="inline-error" role="alert">{dialogError}</p>}
                 </div>
-                {!runningBatches.length && <p className="inline-error">Create a running batch before adding daily records.</p>}
-                {dialogError && <p className="inline-error" role="alert">{dialogError}</p>}
-                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy || !runningBatches.length}>{busy ? "Saving…" : "Save daily record"}</button></div>
+                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy || !runningBatches.length || (Boolean(existingDailyRecord) && !canEditRecords)}>{busy ? "Saving…" : existingDailyRecord ? canEditRecords ? "Update daily record" : "Already recorded" : "Save daily record"}</button></div>
               </form>
             )}
           </section>

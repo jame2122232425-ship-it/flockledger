@@ -13,7 +13,7 @@ The application does not use a service-role key. Requests use the signed-in user
 
 ## Frontend
 
-The initial responsive web experience includes email sign-in/sign-up, farm selection and setup, a farm dashboard, batch listing/creation, and daily-record listing/creation. Sign-up follows the Supabase project's email-confirmation setting. Forms submit to the authenticated API routes above; all farm data access remains enforced by database RLS.
+The initial responsive web experience includes email sign-in/sign-up, farm selection and setup, a farm dashboard, batch listing/creation, and daily-record listing/creation. Daily logs are unique per batch/date; farm owners/managers can update an existing log, with changes audited. Sign-up follows the Supabase project's email-confirmation setting. Forms submit to the authenticated API routes above; all farm data access remains enforced by database RLS.
 
 ## API
 
@@ -55,7 +55,7 @@ Batch IDs are permanent uppercase labels containing `BR` or `KJ`, such as `RPF-B
 
 ## Data rules
 
-- Feed consumed is calculated as feed given minus feed left, never below zero.
+- Feed consumed is calculated as feed given minus feed left over after feeding, never below zero. Remaining store stock is tracked separately in inventory.
 - FCR is feed consumed divided by live-weight output. Running batches use sold live weight plus the estimated weight of living birds from the latest weight sample. Closed batches use live weight sold. If output weight is zero or unavailable, FCR is null.
 - Closed batch records are immutable. Owner/manager corrections are append-only and require a reason; the original row is retained.
 - Owner/manager edits and deletes to ordinary records are audited. Database policies restrict these changes to those roles, and closed-batch triggers reject mutations regardless of the API caller.
