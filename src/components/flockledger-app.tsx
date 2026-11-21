@@ -73,6 +73,7 @@ type DashboardPayload = {
 
 type Tab = "overview" | "batches" | "daily";
 const TAB_CHANGE_EVENT = "flockledger-tab-change";
+const ACTIVE_FARM_STORAGE_KEY = "flockledger:active-farm-id";
 
 function subscribeToTabChanges(onChange: () => void) {
   window.addEventListener("popstate", onChange);
@@ -200,6 +201,101 @@ function Icon({ name }: { name: "overview" | "batch" | "daily" | "bird" | "feed"
   );
 }
 
+function FarmPicker({
+  farms,
+  selectedFarmId,
+  compact = false,
+  onSelect,
+  onAddFarm,
+}: {
+  farms: Farm[];
+  selectedFarmId: string;
+  compact?: boolean;
+  onSelect: (farmId: string) => void;
+  onAddFarm: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const selectedFarm = farms.find((farm) => farm.id === selectedFarmId);
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div className={`farm-picker-control ${compact ? "mobile-farm-picker" : ""}`} ref={pickerRef}>
+      <button
+        ref={triggerRef}
+        className="farm-picker"
+        type="button"
+        aria-label={`Select farm. Current farm: ${selectedFarm?.name ?? "none"}`}
+        aria-expanded={open}
+        aria-haspopup="true"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="farm-avatar">{selectedFarm?.name.slice(0, 1).toUpperCase() ?? "F"}</span>
+        <span className="farm-picker-name">{selectedFarm?.name ?? "Select a farm"}</span>
+        <span className={`select-chevron ${open ? "open" : ""}`} aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="farm-dropdown" role="group" aria-label="Available farms">
+          <span className="farm-dropdown-caption">YOUR FARMS</span>
+          {farms.map((farm) => (
+            <button
+              className={`farm-dropdown-item ${farm.id === selectedFarmId ? "selected" : ""}`}
+              type="button"
+              key={farm.id}
+              aria-pressed={farm.id === selectedFarmId}
+              onClick={() => {
+                onSelect(farm.id);
+                setOpen(false);
+                triggerRef.current?.focus();
+              }}
+            >
+              <span className="farm-dropdown-avatar">{farm.name.slice(0, 1).toUpperCase()}</span>
+              <span className="farm-dropdown-copy">
+                <strong>{farm.name}</strong>
+                <small>{farm.role} account</small>
+              </span>
+              {farm.id === selectedFarmId && <span className="farm-dropdown-check" aria-hidden="true">✓</span>}
+            </button>
+          ))}
+          <div className="farm-dropdown-divider" />
+          <button
+            className="farm-dropdown-add"
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onAddFarm();
+            }}
+          >
+            <span className="farm-dropdown-add-icon" aria-hidden="true">+</span>
+            <span>Add new farm</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function FlockLedgerApp() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
@@ -248,16 +344,32 @@ export default function FlockLedgerApp() {
     setDialog(nextDialog);
   }
 
-  const loadFarms = useCallback(async () => {
+  function handleFarmSelection(nextFarmId: string) {
+    if (nextFarmId === farmId) return;
+    dashboardRequestId.current += 1;
+    setLoadingDashboard(true);
+    setDashboard(null);
+    setFarmBatches([]);
+    setDailyRecords([]);
+    setPageError("");
+    setFeedback("");
+    setFarmId(nextFarmId);
+  }
+
+  const loadFarms = useCallback(async (preferredFarmId?: string) => {
     setLoadingDashboard(true);
     const payload = await request<{ data: unknown[] }>("/api/farms");
     const loadedFarms = payload.data.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
+    const savedFarmId = preferredFarmId ?? window.localStorage.getItem(ACTIVE_FARM_STORAGE_KEY);
     setFarms(loadedFarms);
     setFarmBatches([]);
     setDailyRecords([]);
     setDashboard(null);
     setFarmId((current) =>
-      loadedFarms.some((farm) => farm.id === current) ? current : loadedFarms[0]?.id ?? "",
+      loadedFarms.find((farm) => farm.id === savedFarmId)?.id
+      ?? loadedFarms.find((farm) => farm.id === current)?.id
+      ?? loadedFarms[0]?.id
+      ?? "",
     );
     setAuthenticated(true);
     return loadedFarms;
@@ -269,8 +381,13 @@ export default function FlockLedgerApp() {
       .then((payload) => {
         if (!active) return;
         const loadedFarms = payload.data.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
+        const savedFarmId = window.localStorage.getItem(ACTIVE_FARM_STORAGE_KEY);
         setFarms(loadedFarms);
-        setFarmId(loadedFarms[0]?.id ?? "");
+        setFarmId(
+          loadedFarms.find((farm) => farm.id === savedFarmId)?.id
+          ?? loadedFarms[0]?.id
+          ?? "",
+        );
         setAuthenticated(true);
       })
       .catch((error: unknown) => {
@@ -286,6 +403,10 @@ export default function FlockLedgerApp() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (farmId) window.localStorage.setItem(ACTIVE_FARM_STORAGE_KEY, farmId);
+  }, [farmId]);
 
   const refreshDashboard = useCallback(async (selectedFarmId: string) => {
     const requestId = ++dashboardRequestId.current;
@@ -399,13 +520,23 @@ export default function FlockLedgerApp() {
     const name = String(form.get("farmName") ?? "").trim();
     const openingCashBalanceKes = Number(form.get("openingBalance") || 0);
     try {
-      await request("/api/farms", {
+      const created = await request<{ data: { id: string } }>("/api/farms", {
         method: "POST",
         body: JSON.stringify({ name, openingCashBalanceKes }),
       });
-      await loadFarms();
       setDialog(null);
-      setFeedback("Farm created. You are its owner.");
+      try {
+        await loadFarms(created.data.id);
+      } catch (error) {
+        setLoadingDashboard(false);
+        setPageError(
+          error instanceof Error
+            ? `Farm was created, but the farm list could not be refreshed. ${error.message}`
+            : "Farm was created, but the farm list could not be refreshed. Reload the page.",
+        );
+        return;
+      }
+      setFeedback("Farm created and selected. You are its owner.");
     } catch (error) {
       setFarmError(error instanceof Error ? error.message : "Could not create farm.");
     } finally {
@@ -595,20 +726,7 @@ export default function FlockLedgerApp() {
         <div className="farm-picker-wrap">
           <span className="nav-caption">YOUR FARM</span>
           {farms.length > 0 ? (
-            <label className="farm-picker">
-              <span className="farm-avatar">{activeFarm?.name.slice(0, 1).toUpperCase() ?? "F"}</span>
-              <select aria-label="Select farm" value={farmId} onChange={(event) => {
-                dashboardRequestId.current += 1;
-                setLoadingDashboard(true);
-                setDashboard(null);
-                setFarmBatches([]);
-                setDailyRecords([]);
-                setFarmId(event.target.value);
-              }}>
-                {farms.map((farm) => <option key={farm.id} value={farm.id}>{farm.name}</option>)}
-              </select>
-              <span className="select-chevron" aria-hidden="true" />
-            </label>
+            <FarmPicker farms={farms} selectedFarmId={farmId} onSelect={handleFarmSelection} onAddFarm={() => openDialog("farm")} />
           ) : (
             <button className="farm-picker add-farm-picker" type="button" onClick={() => openDialog("farm")}>
               <span className="farm-avatar">+</span><span>Create your farm</span>
@@ -654,6 +772,11 @@ export default function FlockLedgerApp() {
         </header>
 
         <div className="page-content">
+          {farms.length > 0 && (
+            <div className="mobile-farm-tools">
+              <FarmPicker farms={farms} selectedFarmId={farmId} compact onSelect={handleFarmSelection} onAddFarm={() => openDialog("farm")} />
+            </div>
+          )}
           {pageError && <div className="notice error-notice page-notice" role="alert">{pageError}<button type="button" aria-label="Dismiss error" onClick={() => setPageError("")}>×</button></div>}
           {feedback && <div className="notice success-notice page-notice" role="status">{feedback}<button type="button" aria-label="Dismiss message" onClick={() => setFeedback("")}>×</button></div>}
           {!farms.length ? (
@@ -691,8 +814,8 @@ export default function FlockLedgerApp() {
           <section className={`dialog-card ${dialog === "daily" ? "daily-dialog-card" : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
             <div className="dialog-heading">
               <div>
-                <p className="eyebrow">{dialog === "farm" ? "FARM SETUP" : dialog === "batch" ? "FLOCK MANAGEMENT" : "DAILY HOUSE LOG"}</p>
-                <h2 id="dialog-title">{dialog === "farm" ? "Create a farm" : dialog === "batch" ? "Start a new batch" : "Record today’s activity"}</h2>
+                <p className="eyebrow">{dialog === "farm" ? farms.length ? "ADD TO YOUR WORKSPACE" : "FARM SETUP" : dialog === "batch" ? "FLOCK MANAGEMENT" : "DAILY HOUSE LOG"}</p>
+                <h2 id="dialog-title">{dialog === "farm" ? farms.length ? "Add another farm" : "Create a farm" : dialog === "batch" ? "Start a new batch" : "Record today’s activity"}</h2>
                 {dialog === "daily" && <p className="dialog-description">Choose a flock and date, then record what happened in the house.</p>}
               </div>
               <button className="dialog-close" type="button" aria-label="Close dialog" onClick={() => setDialog(null)}>×</button>
@@ -702,7 +825,7 @@ export default function FlockLedgerApp() {
                 <label>Farm name<input name="farmName" required autoFocus maxLength={128} placeholder="e.g. Green Valley Poultry" /></label>
                 <label>Opening cash balance <span className="field-note">KES</span><input name="openingBalance" type="number" min="0" step="0.01" defaultValue="0" /></label>
                 {farmError && <p className="inline-error" role="alert">{farmError}</p>}
-                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Creating…" : "Create farm"}</button></div>
+                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Creating…" : farms.length ? "Add farm" : "Create farm"}</button></div>
               </form>
             ) : dialog === "batch" ? (
               <form className="form-stack dialog-form" onSubmit={handleBatchCreate}>

@@ -13,7 +13,7 @@ The application does not use a service-role key. Requests use the signed-in user
 
 ## Frontend
 
-The initial responsive web experience includes email sign-in/sign-up, farm selection and setup, a farm dashboard, batch listing/creation, and daily-record listing/creation. Daily logs are unique per batch/date; farm owners/managers can update an existing log, with changes audited. Sign-up follows the Supabase project's email-confirmation setting. Forms submit to the authenticated API routes above; all farm data access remains enforced by database RLS.
+The responsive web experience includes email sign-in/sign-up, farm setup, and farm switching within one account. A user can own or belong to multiple farms; the selected farm controls the dashboard, batch list, daily records, and farm-scoped operations. The selected farm is restored after refresh when the user still has access. Daily logs are unique per batch/date; farm owners/managers can update an existing log, with changes audited. Sign-up follows the Supabase project's email-confirmation setting. Forms submit to the authenticated API routes above; all farm data access remains enforced by database RLS.
 
 ## API
 
@@ -24,8 +24,8 @@ All data endpoints require a signed-in Supabase user. Farm-scoped requests take 
 | POST | `/api/auth/sign-up` | Create an account |
 | POST | `/api/auth/sign-in` | Sign in with email and password |
 | POST | `/api/auth/sign-out` | End the current session |
-| GET | `/api/farms` | List farms for the signed-in user |
-| POST | `/api/farms` | Create a farm with optional opening cash balance; creator becomes owner |
+| GET | `/api/farms` | List all farms the signed-in user belongs to |
+| POST | `/api/farms` | Create another farm with optional opening cash balance; creator becomes its owner |
 | GET, POST, PATCH, DELETE | `/api/farms/:farmId/members` | Manage farm membership and roles (owner-only changes) |
 | GET, POST | `/api/batches` | List or create batches |
 | POST | `/api/batches/:batchId/close` | Close a running batch |
