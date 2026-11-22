@@ -1,37 +1,17 @@
-import { Suspense } from "react";
 import Link from "next/link";
-import { connection } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  LandingCta,
+  LandingHeroActions,
+  LandingHeroFootnote,
+  LandingNavActions,
+  LandingSessionProvider,
+} from "@/components/landing-session";
 
 export const instant = false;
 
 export default function Home() {
   return (
-    <Suspense fallback={<main className="loading-screen" aria-live="polite"><p>Loading FlockLedger…</p></main>}>
-      <LandingContent />
-    </Suspense>
-  );
-}
-
-async function LandingContent() {
-  await connection();
-  let authenticated = false;
-  let accountName = "";
-
-  try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    authenticated = Boolean(user);
-    accountName = String(
-      user?.user_metadata?.full_name
-      ?? user?.email
-      ?? "",
-    ).trim();
-  } catch {
-    authenticated = false;
-  }
-
-  return (
+    <LandingSessionProvider>
     <main className="landing">
       <nav className="landing-nav" aria-label="Main navigation">
         <Link className="landing-brand" href="/" aria-label="FlockLedger home">
@@ -50,17 +30,7 @@ async function LandingContent() {
           <a href="#faq">FAQ</a>
         </div>
         <div className="landing-nav-actions">
-          {authenticated ? (
-            <>
-              {accountName && <span className="landing-account">{accountName}</span>}
-              <a className="landing-button landing-button-amber" href="/app">Open dashboard</a>
-            </>
-          ) : (
-            <>
-              <a className="landing-login" href="/login">Log in</a>
-              <a className="landing-button landing-button-amber" href="/signup">Start Free Trial</a>
-            </>
-          )}
+          <LandingNavActions />
         </div>
       </nav>
 
@@ -75,31 +45,9 @@ async function LandingContent() {
               Replace lost paper logs, track health and withdrawal periods, and know your exact profit per batch.
             </p>
             <div className="landing-hero-actions">
-              {authenticated ? (
-                <>
-                  <a className="landing-button landing-button-amber landing-button-large" href="/app">
-                    Open dashboard
-                  </a>
-                  <a className="landing-demo-link" href="/app?tab=revenue">
-                    <span aria-hidden="true">→</span> View revenue
-                  </a>
-                </>
-              ) : (
-                <>
-                  <a className="landing-button landing-button-amber landing-button-large" href="/signup">
-                    Create Your Free Farm Account
-                  </a>
-                  <a className="landing-demo-link" href="#how-it-works">
-                    <span aria-hidden="true">▶</span> See How It Works
-                  </a>
-                </>
-              )}
+              <LandingHeroActions />
             </div>
-            <p className="landing-no-card">
-              {authenticated
-                ? "Signed in — your latest farm records are ready."
-                : "No credit card required"}
-            </p>
+            <LandingHeroFootnote />
           </div>
 
           <div className="landing-product-visual" aria-label="FlockLedger dashboard preview">
@@ -244,21 +192,7 @@ async function LandingContent() {
       </section>
 
       <section className="landing-cta">
-        <div className="landing-container landing-cta-inner">
-          <div>
-            <p>{authenticated ? "Welcome back." : "Your birds are growing."}</p>
-            <h2>{authenticated ? "Continue where you left off." : "Your records should be too."}</h2>
-          </div>
-          {authenticated ? (
-            <a className="landing-button landing-button-amber landing-button-large" href="/app">
-              Go to Dashboard
-            </a>
-          ) : (
-            <a className="landing-button landing-button-amber landing-button-large" href="/signup">
-              Start Your First Batch Today
-            </a>
-          )}
-        </div>
+        <LandingCta />
       </section>
 
       <footer className="landing-footer">
@@ -278,5 +212,6 @@ async function LandingContent() {
         <div className="landing-container landing-footer-bottom">© 2026 FlockLedger. All rights reserved.</div>
       </footer>
     </main>
+    </LandingSessionProvider>
   );
 }

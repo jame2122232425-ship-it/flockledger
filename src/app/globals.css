@@ -542,7 +542,7 @@ tbody tr:hover { background: #fcfdfb; }
 .landing-hero-glow { position: absolute; width: 520px; height: 520px; right: -110px; top: -260px; border-radius: 50%; background: rgba(245, 158, 11, .12); filter: blur(4px); }
 .landing-hero-grid { position: relative; display: grid; grid-template-columns: 46% 54%; min-height: 620px; align-items: center; gap: 18px; }
 .landing-eyebrow { margin: 0 0 12px; color: var(--landing-green); font-size: 11px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase; }
-.landing-hero-copy h1 { max-width: 600px; margin: 0; font-size: clamp(44px, 5vw, 68px); line-height: 1.02; letter-spacing: -4px; }
+.landing-hero-copy h1 { max-width: 600px; margin: 0; font-size: clamp(38px, 4.5vw, 56px); line-height: 1.06; letter-spacing: -3.2px; }
 .landing-lede { max-width: 560px; margin: 24px 0 28px; color: #475569; font-size: 17px; line-height: 1.75; }
 .landing-hero-actions { display: flex; align-items: center; gap: 20px; }
 .landing-demo-link { display: inline-flex; align-items: center; gap: 9px; color: #334155; font-size: 13px; font-weight: 750; text-decoration: none; }
@@ -575,7 +575,7 @@ tbody tr:hover { background: #fcfdfb; }
 .landing-section { padding: 96px 0; }
 .landing-section-tint { background: var(--landing-slate); }
 .landing-section-heading-centered { max-width: 760px; margin: 0 auto 48px; text-align: center; }
-.landing-section-heading h2 { margin: 0; font-size: clamp(34px, 4vw, 48px); line-height: 1.12; letter-spacing: -2.4px; }
+.landing-section-heading h2 { margin: 0; font-size: clamp(30px, 3.5vw, 40px); line-height: 1.16; letter-spacing: -2px; }
 .problem-solution { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
 .problem-card, .solution-card { padding: 34px; border-radius: 16px; }
 .problem-card { background: #f1f5f9; color: #64748b; }
@@ -583,7 +583,7 @@ tbody tr:hover { background: #fcfdfb; }
 .landing-card-kicker { margin: 0 0 8px; font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
 .problem-card .landing-card-kicker { color: #94a3b8; }
 .solution-card .landing-card-kicker { color: var(--landing-green); }
-.problem-card h3, .solution-card h3 { margin: 0 0 24px; color: var(--landing-text); font-size: 23px; }
+.problem-card h3, .solution-card h3 { margin: 0 0 24px; color: var(--landing-text); font-size: 20px; }
 .problem-card ul, .solution-card ul { display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
 .problem-card li, .solution-card li { display: flex; align-items: flex-start; gap: 12px; font-size: 14px; line-height: 1.55; }
 .solution-card li { color: #334155; }
@@ -594,7 +594,7 @@ tbody tr:hover { background: #fcfdfb; }
 .landing-feature-card { min-height: 220px; padding: 28px; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; transition: transform .18s, box-shadow .18s; }
 .landing-feature-card:hover { transform: translateY(-3px); box-shadow: 0 18px 45px rgba(15,23,42,.08); }
 .landing-feature-card > span { display: grid; width: 38px; height: 38px; place-items: center; margin-bottom: 26px; border-radius: 9px; background: #ecfdf3; color: var(--landing-green); font-size: 11px; font-weight: 800; }
-.landing-feature-card h3 { margin: 0 0 10px; font-size: 18px; letter-spacing: -.4px; }
+.landing-feature-card h3 { margin: 0 0 10px; font-size: 16px; letter-spacing: -.3px; }
 .landing-feature-card p { margin: 0; color: #64748b; font-size: 13px; line-height: 1.7; }
 .landing-testimonial-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .landing-testimonial-grid article { min-height: 220px; display: flex; flex-direction: column; justify-content: space-between; padding: 28px; border: 1px solid #e2e8f0; border-radius: 14px; }
@@ -606,12 +606,12 @@ tbody tr:hover { background: #fcfdfb; }
 .landing-step-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
 .landing-step-grid article { position: relative; padding: 20px 30px 20px 0; }
 .landing-step-grid article > span { display: grid; width: 46px; height: 46px; place-items: center; margin-bottom: 22px; border-radius: 50%; background: var(--landing-green); color: #fff; font-weight: 800; }
-.landing-step-grid h3 { margin: 0 0 10px; font-size: 19px; }
+.landing-step-grid h3 { margin: 0 0 10px; font-size: 17px; }
 .landing-step-grid p { margin: 0; color: #64748b; font-size: 13px; line-height: 1.7; }
 .landing-cta { background: var(--landing-green); color: #fff; }
 .landing-cta-inner { display: flex; min-height: 210px; align-items: center; justify-content: space-between; gap: 30px; }
 .landing-cta-inner p { margin: 0 0 6px; color: #bbf7d0; font-size: 14px; }
-.landing-cta-inner h2 { margin: 0; font-size: clamp(34px, 4vw, 48px); letter-spacing: -2px; }
+.landing-cta-inner h2 { margin: 0; font-size: clamp(30px, 3.5vw, 40px); letter-spacing: -1.6px; }
 .landing-footer { background: #0f2d1b; color: #dce8df; }
 .landing-footer-grid { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 38px; padding-top: 60px; padding-bottom: 50px; }
 .landing-footer .landing-brand { color: #fff; }
@@ -640,7 +640,7 @@ tbody tr:hover { background: #fcfdfb; }
   .landing-brand-mark { width: 34px; height: 34px; }
   .landing-hero-grid { grid-template-columns: 1fr; padding-top: 64px; }
   .landing-hero-copy { text-align: center; }
-  .landing-hero-copy h1 { font-size: 43px; letter-spacing: -2.5px; }
+  .landing-hero-copy h1 { font-size: 36px; letter-spacing: -2px; }
   .landing-lede { font-size: 15px; }
   .landing-hero-actions { justify-content: center; flex-direction: column; gap: 14px; }
   .landing-product-visual { height: 330px; margin-top: 10px; }
@@ -649,7 +649,7 @@ tbody tr:hover { background: #fcfdfb; }
   .landing-laptop-base { width: 450px; }
   .landing-phone { width: 135px; right: calc(50% + 105px); bottom: 6px; min-height: 245px; }
   .landing-section { padding: 72px 0; }
-  .landing-section-heading h2 { font-size: 35px; letter-spacing: -1.8px; }
+  .landing-section-heading h2 { font-size: 30px; letter-spacing: -1.5px; }
   .problem-solution, .landing-feature-grid, .landing-testimonial-grid, .landing-step-grid { grid-template-columns: 1fr; }
   .landing-feature-card { min-height: 190px; }
   .landing-testimonial-grid article { min-height: 190px; }
@@ -974,7 +974,12 @@ table,
   border-color: #15803d;
 }
 
-.landing-footer { background: #15803d; }
+.landing-footer { background: #f8fafc; }
+.landing-footer-grid .landing-brand {
+  display: inline-flex;
+  margin: 0;
+  color: #0f172a;
+}
 .landing-footer .landing-brand,
 .landing-footer-grid strong,
 .landing-footer-grid a,
