@@ -25,9 +25,9 @@ export default function Home() {
         </Link>
         <div className="landing-nav-links">
           <a href="#features">Features</a>
-          <a href="#pricing">Pricing</a>
-          <a href="#guides">Guides</a>
-          <a href="#faq">FAQ</a>
+          <Link href="/pricing">Pricing</Link>
+          <Link href="/guides">Guides</Link>
+          <Link href="/faq">FAQ</Link>
         </div>
         <div className="landing-nav-actions">
           <LandingNavActions />
@@ -204,10 +204,10 @@ export default function Home() {
             </Link>
             <p>Better poultry records. Better farm decisions.</p>
           </div>
-          <div><strong>Product</strong><a href="#features">Features</a><a id="pricing" href="/signup">Pricing</a><a id="guides" href="#how-it-works">Guides</a></div>
-          <div><strong>Company</strong><a href="#about">About Us</a><a href="mailto:support@flockledger.co.ke">Contact</a><a href="#blog">Blog</a></div>
-          <div><strong>Legal</strong><a href="#privacy">Privacy Policy</a><a href="#terms">Terms of Service</a><a href="#security">Data Security</a></div>
-          <div><strong>Contact</strong><a href="mailto:support@flockledger.co.ke">Support email</a><a href="https://wa.me/" id="faq">WhatsApp</a></div>
+          <div><strong>Product</strong><a href="#features">Features</a><Link href="/pricing">Pricing</Link><Link href="/guides">Guides</Link></div>
+          <div><strong>Company</strong><Link href="/about">About Us</Link><Link href="/contact">Contact</Link><Link href="/blog">Blog</Link></div>
+          <div><strong>Legal</strong><Link href="/#privacy">Privacy Policy</Link><Link href="/#terms">Terms of Service</Link><Link href="/#security">Data Security</Link></div>
+          <div><strong>Contact</strong><a href="mailto:support@flockledger.co.ke">Support email</a><Link href="/contact">Contact us</Link></div>
         </div>
         <div className="landing-container landing-footer-bottom">© 2026 FlockLedger. All rights reserved.</div>
       </footer>

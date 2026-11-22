@@ -6,6 +6,16 @@ export async function GET() {
   await connection();
   try {
     const supabase = await createSupabaseServerClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return NextResponse.json({
+        data: {
+          authenticated: false,
+          accountName: "",
+        },
+      });
+    }
+
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error) {
       console.error("Failed to verify landing page session:", error.message);
