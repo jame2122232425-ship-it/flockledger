@@ -230,14 +230,14 @@ export default function MarketingPage({ page }: { page: MarketingPageKey }) {
         <main className="marketing-main">
           {page === "pricing" ? content : (
             <>
-              <header className="marketing-page-hero">
+              <header className={`marketing-page-hero marketing-page-hero-${page}`}>
                 <div className="landing-container">
                   <p className="landing-eyebrow">{details.eyebrow}</p>
                   <h1>{details.title}</h1>
                   <p>{details.summary}</p>
                 </div>
               </header>
-              <section className="landing-container marketing-content">
+              <section className={`landing-container marketing-content marketing-content-${page}`}>
                 {content}
               </section>
             </>
