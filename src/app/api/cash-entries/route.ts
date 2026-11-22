@@ -18,7 +18,7 @@ const createSchema = z.object({
 );
 
 const fields =
-  "id, farm_id, batch_id, entry_date, details, category, receipt_number, money_in_kes, money_out_kes, created_at";
+  "id, farm_id, batch_id, sale_payment_id, entry_date, details, category, receipt_number, money_in_kes, money_out_kes, created_at";
 
 export async function GET(request: NextRequest) {
   const parsed = z.object({ farmId: z.string().uuid(), batchId: z.string().uuid().optional() })
@@ -31,10 +31,59 @@ export async function GET(request: NextRequest) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    let query = supabase.from("cash_entries").select(fields)
-      .eq("farm_id", parsed.data.farmId).order("entry_date", { ascending: false });
-    if (parsed.data.batchId) query = query.eq("batch_id", parsed.data.batchId);
-    const { data, error } = await query;
+    if (parsed.data.batchId) {
+      const { data: sales, error: salesError } = await supabase.from("sales")
+        .select("id")
+        .eq("farm_id", parsed.data.farmId)
+        .eq("batch_id", parsed.data.batchId);
+      if (salesError) {
+        console.error("Failed to find batch sale payments:", salesError.code);
+        return apiError("Could not load cash entries.", 500);
+      }
+
+      const saleIds = sales.map((sale) => sale.id);
+      const paymentQuery = saleIds.length
+        ? supabase.from("sale_payments").select("id")
+          .eq("farm_id", parsed.data.farmId).in("sale_id", saleIds)
+        : null;
+      const batchEntriesQuery = supabase.from("cash_entries").select(fields)
+        .eq("farm_id", parsed.data.farmId)
+        .eq("batch_id", parsed.data.batchId);
+      const [paymentResult, batchEntriesResult] = await Promise.all([
+        paymentQuery,
+        batchEntriesQuery.order("entry_date", { ascending: false }),
+      ]);
+      if (paymentResult?.error || batchEntriesResult.error) {
+        console.error(
+          "Failed to load batch cash entries:",
+          paymentResult?.error?.code ?? batchEntriesResult.error?.code,
+        );
+        return apiError("Could not load cash entries.", 500);
+      }
+
+      const paymentIds = paymentResult?.data.map((payment) => payment.id) ?? [];
+      const paymentEntriesResult = paymentIds.length
+        ? await supabase.from("cash_entries").select(fields)
+          .eq("farm_id", parsed.data.farmId)
+          .in("sale_payment_id", paymentIds)
+          .order("entry_date", { ascending: false })
+        : { data: [], error: null };
+      if (paymentEntriesResult.error) {
+        console.error("Failed to load payment cash entries:", paymentEntriesResult.error.code);
+        return apiError("Could not load cash entries.", 500);
+      }
+
+      const data = [...batchEntriesResult.data, ...(paymentEntriesResult.data ?? [])]
+        .sort((left, right) =>
+          right.entry_date.localeCompare(left.entry_date)
+          || right.created_at.localeCompare(left.created_at),
+        );
+      return NextResponse.json({ data });
+    }
+
+    const { data, error } = await supabase.from("cash_entries").select(fields)
+      .eq("farm_id", parsed.data.farmId)
+      .order("entry_date", { ascending: false });
     if (error) {
       console.error("Failed to load cash entries:", error.code);
       return apiError("Could not load cash entries.", 500);

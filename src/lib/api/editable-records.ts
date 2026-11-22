@@ -107,7 +107,7 @@ export const editableResources: Record<string, EditableResource> = {
   },
   sales: {
     table: "sales",
-    fields: "id, farm_id, batch_id, sale_date, customer, birds_sold, total_weight_kg, price_basis, price_kes, amount_kes, paid_kes, receipt_number, remarks, created_at",
+    fields: "id, farm_id, batch_id, sale_date, customer, birds_sold, total_weight_kg, price_basis, price_kes, amount_kes, receipt_number, remarks, created_at",
     editableFields: {
       saleDate: date("sale_date"),
       customer: requiredText("customer", 128),
@@ -115,7 +115,6 @@ export const editableResources: Record<string, EditableResource> = {
       totalWeightKg: field("total_weight_kg", z.number().positive()),
       priceBasis: field("price_basis", z.enum(["Bird", "Kg"])),
       priceKes: number("price_kes"),
-      paidKes: number("paid_kes"),
       receiptNumber: text("receipt_number", 64),
       remarks: text("remarks", 2000),
     },

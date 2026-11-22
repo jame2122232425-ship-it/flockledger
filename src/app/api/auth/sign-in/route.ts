@@ -25,7 +25,11 @@ export async function POST(request: NextRequest) {
     if (error || !data.user) return apiError("Invalid email or password.", 401);
 
     return NextResponse.json({
-      data: { userId: data.user.id, email: data.user.email },
+      data: {
+        userId: data.user.id,
+        email: data.user.email,
+        requiresPasswordChange: data.user.app_metadata?.force_password_change === true,
+      },
     });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {

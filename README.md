@@ -6,6 +6,7 @@ FlockLedger is a multi-farm poultry record system built with Next.js, Supabase, 
 
 1. Install Node.js 20.9 or newer.
 2. Copy `.env.example` to `.env.local` and add the Supabase project URL and publishable/anon key.
+   Staff provisioning also requires `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`. Keep this key server-only and never expose it with a `NEXT_PUBLIC_` prefix.
 3. Apply every SQL migration in `supabase/migrations` in filename order to a Supabase project. Apply new migrations once; do not rerun an earlier migration against an existing project.
 4. Run `npm run dev`.
 
@@ -13,7 +14,7 @@ The application does not use a service-role key. Requests use the signed-in user
 
 ## Frontend
 
-The responsive web experience includes email sign-in/sign-up, farm setup, and farm switching within one account. A user can own or belong to multiple farms; the selected farm controls the dashboard, batch list, daily records, and farm-scoped operations. The selected farm is restored after refresh when the user still has access. Daily logs are unique per batch/date; farm owners/managers can update an existing log, with changes audited. Sign-up follows the Supabase project's email-confirmation setting. Forms submit to the authenticated API routes above; all farm data access remains enforced by database RLS.
+The responsive web experience includes email sign-in/sign-up, farm setup, and farm switching within one account. A user can own or belong to multiple farms; the selected farm controls the dashboard, batch list, daily records, revenue ledger, and farm-scoped operations. The Revenue screen filters sales and adjustment entries by date, batch, payment status, and buyer; authorized users can record sales and append dated payments, which are linked to cashbook income automatically. The selected farm is restored after refresh when the user still has access. Daily logs are unique per batch/date; farm owners/managers can update an existing log, with changes audited. Sign-up follows the Supabase project's email-confirmation setting. Forms submit to the authenticated API routes above; all farm data access remains enforced by database RLS.
 
 ## API
 
@@ -34,7 +35,8 @@ All data endpoints require a signed-in Supabase user. Farm-scoped requests take 
 | GET, POST | `/api/brooding-observations` | Record brooder/house temperatures, humidity, chick behavior, and actions |
 | GET, POST | `/api/feed-deliveries` | List or record feed deliveries |
 | GET, POST | `/api/health-records` | List or record vaccinations, treatments, and post-mortems |
-| GET, POST | `/api/sales` | List or record sales |
+| GET, POST | `/api/sales` | Filter revenue rows or record a sale with an optional initial payment |
+| GET, POST | `/api/sales/:saleId/payments` | List or record individual sale payments |
 | GET, POST | `/api/cash-entries` | List or record farm income and expenses |
 | GET, POST | `/api/inventory` | List stock balances or create inventory items |
 | GET, POST | `/api/stock-movements` | List or record inventory receipts and use |
@@ -51,7 +53,9 @@ All data endpoints require a signed-in Supabase user. Farm-scoped requests take 
 
 For `PATCH`, send `{ "farmId": "<uuid>", "changes": { "<camelCaseField>": value } }`. For `DELETE`, pass `?farmId=<uuid>`. Resource names are the corresponding collection names in this table (for example `daily-records` or `health-records`). Farm and batch identity fields, generated totals, correction entries, and audit events are not editable through this endpoint. Batch metadata can be edited, but batch records themselves cannot be deleted.
 
-Batch IDs are permanent uppercase labels containing `BR` or `KJ`, such as `RPF-BR-2611-01` and `RPF-KJ-2611-01`. They must be unique within a farm.
+`GET /api/sales` accepts `farmId` plus optional `from`, `to`, `batchId`, `paymentStatus` (`paid`, `partial`, or `unpaid`), and buyer `search` filters. Its `summary` totals use the same filtered rows. Record a payment with `{ "farmId": "<uuid>", "paymentDate": "YYYY-MM-DD", "amountKes": 100, "reference": "optional" }` at `/api/sales/:saleId/payments`; `paidKes` on sale creation records an initial payment transaction. Batch-filtered cash-entry requests include linked sale receipts.
+
+Batch IDs are generated and read-only when creating a batch. The label uses the farm-name initials, `BR` or `KJ`, the placement month (`YYMM`), an optional house token, and the next monthly sequence—for example `RPF-BR-2611-01` or `RPF-BR-A-2611-01`. IDs must be unique within a farm and are never reused.
 
 ## Data rules
 
@@ -60,6 +64,8 @@ Batch IDs are permanent uppercase labels containing `BR` or `KJ`, such as `RPF-B
 - Closed batch records are immutable. Owner/manager corrections are append-only and require a reason; the original row is retained.
 - Owner/manager edits and deletes to ordinary records are audited. Database policies restrict these changes to those roles, and closed-batch triggers reject mutations regardless of the API caller.
 - Closed-batch corrections can adjust mortality/culls/feed, sale quantities/weight/revenue/payments, and tagged cashbook amounts. Corrections are attributed to the authenticated user and timestamped; correction totals are reflected in batch performance.
+- Closed-batch correction-added sales appear as adjustment rows dated by the correction's Africa/Nairobi entry date.
+- Sale payments are individual, append-only transactions. Each new payment (including an initial payment recorded with a sale) creates a linked cashbook income entry automatically. Existing paid amounts are migrated into payment history without creating duplicate historical cashbook entries. Cumulative payment totals are derived from payment history and sale corrections rather than editable sale fields.
 - PostgreSQL dates store farm activity dates as `DATE` values. All farm data is scoped by `farm_id`.
 - RLS allows owners and managers to manage batches; attendants can record daily, weight, feed, and stock activity; veterinarians can add health records; accountants can add sales and cash entries.
 - A farm must always retain at least one owner. Memberships are audited, and owners cannot remove or demote the last owner.
