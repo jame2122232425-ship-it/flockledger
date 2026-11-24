@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 const createSchema = z.object({
   farmId: z.string().uuid(),
@@ -13,6 +18,8 @@ const createSchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const parsed = z.object({ farmId: z.string().uuid() }).safeParse({
     farmId: request.nextUrl.searchParams.get("farmId"),
   });
@@ -21,9 +28,13 @@ export async function GET(request: NextRequest) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    const { data, error } = await supabase.from("inventory_balances")
-      .select("item_id, name, item_type, unit, reorder_level, expiry_date, total_received, total_used, balance")
-      .eq("farm_id", parsed.data.farmId).order("name", { ascending: true });
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await supabase.from("inventory_balances")
+      .select("item_id, name, item_type, unit, reorder_level, expiry_date, total_received, total_used, balance", { count: "exact" })
+      .eq("farm_id", parsed.data.farmId)
+      .order("name", { ascending: true })
+      .order("item_id", { ascending: true })
+      .range(from, to);
     if (error) {
       console.error("Failed to load inventory:", error.code);
       return apiError("Could not load inventory.", 500);
@@ -44,6 +55,7 @@ export async function GET(request: NextRequest) {
               : "OK";
         return { ...item, status };
       }),
+      pagination: paginationMetadata(count ?? 0, pagination),
     });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) return apiError(error.message, 503);

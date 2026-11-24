@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError, isUuid } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 const memberSchema = z.object({
   userId: z.string().uuid(),
@@ -10,21 +15,30 @@ const memberSchema = z.object({
 
 type RouteContext = { params: Promise<{ farmId: string }> };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const { farmId } = await context.params;
   if (!isUuid(farmId)) return apiError("Invalid farm ID.", 400);
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    const { data, error } = await supabase.from("farm_memberships")
-      .select("farm_id, user_id, role, created_at")
-      .eq("farm_id", farmId).order("created_at", { ascending: true });
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await supabase.from("farm_memberships")
+      .select("farm_id, user_id, role, created_at", { count: "exact" })
+      .eq("farm_id", farmId)
+      .order("created_at", { ascending: true })
+      .order("user_id", { ascending: true })
+      .range(from, to);
     if (error) {
       console.error("Failed to load farm members:", error.code);
       return apiError("Could not load farm members.", 500);
     }
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      pagination: paginationMetadata(count ?? 0, pagination),
+    });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) return apiError(error.message, 503);
     console.error("Unexpected farm member list error:", error);

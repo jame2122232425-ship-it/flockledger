@@ -1,4 +1,44 @@
+import { z } from "zod";
+
 export type RevenueSaleStatus = "paid" | "partial" | "unpaid";
+
+export const revenueCursorSchema = z.object({
+  saleDate: z.iso.date(),
+  createdAt: z.string().datetime({ offset: true }),
+  id: z.string().min(1).max(64),
+});
+
+export type RevenueCursor = z.infer<typeof revenueCursorSchema>;
+
+export const revenueLedgerPageSchema = z.object({
+  data: z.array(z.object({
+    id: z.string(),
+    farm_id: z.string().uuid(),
+    batch_id: z.string().uuid(),
+    sale_date: z.iso.date(),
+    customer: z.string(),
+    birds_sold: z.number(),
+    total_weight_kg: z.number(),
+    price_basis: z.enum(["Bird", "Kg"]).nullable(),
+    price_kes: z.number().nullable(),
+    amount_kes: z.number(),
+    paid_kes: z.number(),
+    outstanding_kes: z.number(),
+    payment_status: z.enum(["paid", "partial", "unpaid"]),
+    receipt_number: z.string().nullable(),
+    remarks: z.string().nullable(),
+    created_at: z.string().datetime({ offset: true }),
+    is_adjustment: z.boolean(),
+  })),
+  summary: z.object({
+    sales_kes: z.number(),
+    received_kes: z.number(),
+    outstanding_kes: z.number(),
+    sale_count: z.number().int().nonnegative(),
+  }),
+  hasMore: z.boolean(),
+  nextCursor: revenueCursorSchema.nullable(),
+});
 
 type SaleRow = {
   id: string;
@@ -148,7 +188,9 @@ export function buildRevenueSales(
   }
 
   return records.sort((left, right) =>
-    right.sale_date.localeCompare(left.sale_date) || right.created_at.localeCompare(left.created_at),
+    right.sale_date.localeCompare(left.sale_date)
+    || right.created_at.localeCompare(left.created_at)
+    || right.id.localeCompare(left.id),
   );
 }
 

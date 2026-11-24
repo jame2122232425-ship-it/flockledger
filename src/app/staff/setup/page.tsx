@@ -47,7 +47,10 @@ function StaffSetupContent() {
       const response = await fetch("/api/staff/setup/password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          password,
+          ...(tokenHash ? { tokenHash } : {}),
+        }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Could not change password.");

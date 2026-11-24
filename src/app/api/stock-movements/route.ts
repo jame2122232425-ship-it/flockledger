@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 const createSchema = z.object({
   farmId: z.string().uuid(),
@@ -23,6 +28,8 @@ const fields =
   "id, farm_id, item_id, batch_id, movement_date, received, used, supplier, invoice_number, expiry_date, remarks, created_at";
 
 export async function GET(request: NextRequest) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const parsed = z.object({ farmId: z.string().uuid(), itemId: z.string().uuid().optional() })
     .safeParse({
       farmId: request.nextUrl.searchParams.get("farmId"),
@@ -33,15 +40,21 @@ export async function GET(request: NextRequest) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    let query = supabase.from("stock_movements").select(fields)
-      .eq("farm_id", parsed.data.farmId).order("movement_date", { ascending: false });
+    let query = supabase.from("stock_movements").select(fields, { count: "exact" })
+      .eq("farm_id", parsed.data.farmId)
+      .order("movement_date", { ascending: false })
+      .order("id", { ascending: false });
     if (parsed.data.itemId) query = query.eq("item_id", parsed.data.itemId);
-    const { data, error } = await query;
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await query.range(from, to);
     if (error) {
       console.error("Failed to load stock movements:", error.code);
       return apiError("Could not load stock movements.", 500);
     }
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      pagination: paginationMetadata(count ?? 0, pagination),
+    });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) return apiError(error.message, 503);
     console.error("Unexpected stock movement list error:", error);

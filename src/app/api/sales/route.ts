@@ -1,29 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import {
-  buildRevenueSales,
-  filterRevenueSales,
-  summarizeRevenueSales,
-} from "@/lib/revenue/sales";
+import { revenueCursorSchema, revenueLedgerPageSchema } from "@/lib/revenue/sales";
 import { saleCreateSchema, salesListQuerySchema } from "@/lib/validation/sales";
-
-const saleFields =
-  "id, farm_id, batch_id, sale_date, customer, birds_sold, total_weight_kg, price_basis, price_kes, amount_kes, receipt_number, remarks, created_at";
-const correctionFields =
-  "id, batch_id, source_record_id, reason, birds_sold_delta, live_weight_sold_kg_delta, revenue_kes_delta, paid_kes_delta, created_at";
-const paymentFields = "sale_id, amount_kes";
-
-function nextDate(value: string) {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString().slice(0, 10);
-}
-
-function dateTimeInNairobi(date: string) {
-  return `${date}T00:00:00+03:00`;
-}
+import { payloadHash, requireIdempotencyKey } from "@/lib/security";
+import { parsePagination } from "@/lib/api/pagination";
 
 export async function GET(request: NextRequest) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const query = salesListQuerySchema.safeParse({
     farmId: request.nextUrl.searchParams.get("farmId"),
     batchId: request.nextUrl.searchParams.get("batchId") ?? undefined,
@@ -33,79 +19,58 @@ export async function GET(request: NextRequest) {
     search: request.nextUrl.searchParams.get("search") ?? undefined,
   });
   if (!query.success) return apiError("Provide valid farm, date, and sales filters.", 400);
+  const rawCursor = request.nextUrl.searchParams.get("cursor");
+  let cursor: z.infer<typeof revenueCursorSchema> | null = null;
+  if (rawCursor) {
+    let cursorValue: unknown;
+    try {
+      cursorValue = JSON.parse(rawCursor);
+    } catch {
+      return apiError("Provide a valid sales cursor.", 400);
+    }
+    const parsedCursor = revenueCursorSchema.safeParse(cursorValue);
+    if (!parsedCursor.success) return apiError("Provide a valid sales cursor.", 400);
+    cursor = parsedCursor.data;
+  }
 
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
 
-    let salesQuery = supabase.from("sales").select(saleFields)
-      .eq("farm_id", query.data.farmId)
-      .order("sale_date", { ascending: false });
-    if (query.data.batchId) salesQuery = salesQuery.eq("batch_id", query.data.batchId);
-    if (query.data.from) salesQuery = salesQuery.gte("sale_date", query.data.from);
-    if (query.data.to) salesQuery = salesQuery.lte("sale_date", query.data.to);
-    if (query.data.search) {
-      const literalSearch = query.data.search.replace(/[\\%_]/g, "\\$&");
-      salesQuery = salesQuery.ilike("customer", `%${literalSearch}%`);
-    }
-
-    const { data: sales, error: salesError } = await salesQuery;
-    if (salesError) {
-      console.error("Failed to load sales:", salesError.code);
-      return apiError("Could not load sales.", 500);
-    }
-
-    const saleIds = sales.map((sale) => sale.id);
-    const paymentQuery = saleIds.length
-      ? supabase.from("sale_payments").select(paymentFields)
-        .eq("farm_id", query.data.farmId).in("sale_id", saleIds)
-      : null;
-    const saleCorrectionQuery = saleIds.length
-      ? supabase.from("corrections").select(correctionFields)
-        .eq("farm_id", query.data.farmId).eq("source_table", "sales")
-        .in("source_record_id", saleIds)
-      : null;
-    let adjustmentQuery = query.data.search
-      ? null
-      : supabase.from("corrections").select(correctionFields)
-        .eq("farm_id", query.data.farmId).eq("source_table", "sales")
-        .is("source_record_id", null);
-    if (adjustmentQuery && query.data.batchId) {
-      adjustmentQuery = adjustmentQuery.eq("batch_id", query.data.batchId);
-    }
-    if (adjustmentQuery && query.data.from) {
-      adjustmentQuery = adjustmentQuery.gte("created_at", dateTimeInNairobi(query.data.from));
-    }
-    if (adjustmentQuery && query.data.to) {
-      adjustmentQuery = adjustmentQuery.lt(
-        "created_at",
-        dateTimeInNairobi(nextDate(query.data.to)),
-      );
-    }
-
-    const [paymentResult, saleCorrectionResult, adjustmentResult] = await Promise.all([
-      paymentQuery,
-      saleCorrectionQuery,
-      adjustmentQuery,
-    ]);
-    const secondaryError =
-      paymentResult?.error ?? saleCorrectionResult?.error ?? adjustmentResult?.error;
-    if (secondaryError) {
-      console.error("Failed to load sale payments or corrections:", secondaryError.code);
+    const { data, error } = await supabase.rpc("get_revenue_ledger_page", {
+      p_farm_id: query.data.farmId,
+      p_batch_id: query.data.batchId ?? null,
+      p_from: query.data.from ?? null,
+      p_to: query.data.to ?? null,
+      p_payment_status: query.data.paymentStatus ?? null,
+      p_search: query.data.search?.trim() || null,
+      p_cursor_date: cursor?.saleDate ?? null,
+      p_cursor_created_at: cursor?.createdAt ?? null,
+      p_cursor_id: cursor?.id ?? null,
+      p_page_size: pagination.pageSize,
+    });
+    if (error) {
+      console.error("Failed to load paginated revenue:", error.code);
       return apiError("Could not load revenue details.", 500);
     }
-
-    const records = buildRevenueSales(
-      sales,
-      paymentResult?.data ?? [],
-      [...(saleCorrectionResult?.data ?? []), ...(adjustmentResult?.data ?? [])],
-      query.data.farmId,
-    );
-    const filteredRecords = filterRevenueSales(records, query.data.paymentStatus);
+    const result = revenueLedgerPageSchema.safeParse(data);
+    if (!result.success) {
+      console.error("Revenue page returned an invalid shape.");
+      return apiError("Could not load revenue details.", 500);
+    }
+    const total = result.data.summary.sale_count;
     return NextResponse.json({
-      data: filteredRecords,
-      summary: summarizeRevenueSales(filteredRecords),
+      data: result.data.data,
+      summary: result.data.summary,
+      pagination: {
+        page: pagination.page,
+        pageSize: pagination.pageSize,
+        total,
+        pageCount: Math.ceil(total / pagination.pageSize),
+        hasMore: result.data.hasMore,
+        nextCursor: result.data.nextCursor,
+      },
     });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {
@@ -130,6 +95,10 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  const idempotencyKey = requireIdempotencyKey(request);
+  if (!idempotencyKey) {
+    return apiError("Provide an Idempotency-Key header.", 400);
+  }
 
   try {
     const supabase = await createSupabaseServerClient();
@@ -137,7 +106,7 @@ export async function POST(request: NextRequest) {
     if (authError || !user) return apiError("Authentication required.", 401);
 
     const sale = parsed.data;
-    const { data, error } = await supabase.rpc("create_sale", {
+    const { data, error } = await supabase.rpc("create_sale_idempotent", {
       p_farm_id: sale.farmId,
       p_batch_id: sale.batchId,
       p_sale_date: sale.saleDate,
@@ -149,6 +118,20 @@ export async function POST(request: NextRequest) {
       p_paid_kes: sale.paidKes,
       p_receipt_number: sale.receiptNumber ?? null,
       p_remarks: sale.remarks ?? null,
+      p_idempotency_key: idempotencyKey,
+      p_payload_hash: payloadHash({
+        farmId: sale.farmId,
+        batchId: sale.batchId,
+        saleDate: sale.saleDate,
+        customer: sale.customer,
+        birdsSold: sale.birdsSold,
+        totalWeightKg: sale.totalWeightKg,
+        priceBasis: sale.priceBasis,
+        priceKes: sale.priceKes,
+        paidKes: sale.paidKes,
+        receiptNumber: sale.receiptNumber ?? null,
+        remarks: sale.remarks ?? null,
+      }),
     });
     if (error) {
       if (error.code === "42501") return apiError("You cannot record sales for this farm.", 403);

@@ -2,13 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 const createFarmSchema = z.object({
   name: z.string().trim().min(1).max(128),
   openingCashBalanceKes: z.number().min(0).default(0),
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   try {
     const supabase = await createSupabaseServerClient();
     const {
@@ -17,17 +24,23 @@ export async function GET() {
     } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
 
-    const { data, error } = await supabase
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await supabase
       .from("farm_memberships")
-      .select("farm_id, role, farms(id, name, currency, timezone, opening_cash_balance_kes)")
+      .select("farm_id, role, farms(id, name, currency, timezone, opening_cash_balance_kes)", { count: "exact" })
       .eq("user_id", user.id)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .order("farm_id", { ascending: true })
+      .range(from, to);
 
     if (error) {
       console.error("Failed to load farm memberships:", error.code);
       return apiError("Could not load farms.", 500);
     }
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      pagination: paginationMetadata(count ?? 0, pagination),
+    });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {
       return apiError(error.message, 503);

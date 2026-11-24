@@ -3,9 +3,12 @@ import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createHash } from "node:crypto";
+import { attemptKey, getClientIp } from "@/lib/security";
 
 const passwordSchema = z.object({
   password: z.string().min(8).max(128),
+  tokenHash: z.string().min(20).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -22,6 +25,13 @@ export async function POST(request: NextRequest) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
+    const keyHash = attemptKey(getClientIp(request), user.id);
+    const { data: allowed, error: limitError } = await supabase.rpc(
+      "check_auth_attempt",
+      { p_scope: "staff-password", p_key_hash: keyHash, p_limit: 10, p_window_seconds: 900 },
+    );
+    if (limitError) return apiError("Password setup is temporarily unavailable.", 503);
+    if (!allowed) return apiError("Too many password setup attempts. Try again later.", 429);
 
     if (user.app_metadata?.force_password_change !== true) {
       return apiError("This account does not require a password setup.", 400);
@@ -30,7 +40,14 @@ export async function POST(request: NextRequest) {
     const { error: passwordError } = await supabase.auth.updateUser({
       password: parsed.data.password,
     });
-    if (passwordError) return apiError("Could not change password.", 400);
+    if (passwordError) {
+      await supabase.rpc("record_auth_attempt", {
+        p_scope: "staff-password",
+        p_key_hash: keyHash,
+        p_window_seconds: 900,
+      });
+      return apiError("Could not change password.", 400);
+    }
 
     const admin = createSupabaseAdminClient();
     const { error: metadataError } = await admin.auth.admin.updateUserById(user.id, {
@@ -43,14 +60,21 @@ export async function POST(request: NextRequest) {
       return apiError("Password changed, but account setup could not be finalized.", 500);
     }
 
-    await admin
-      .from("farm_invitations")
-      .update({
-        status: "accepted",
-        accepted_at: new Date().toISOString(),
-        setup_token_hash: null,
-      })
-      .eq("email", (user.email ?? "").toLowerCase());
+    if (parsed.data.tokenHash) {
+      const setupTokenHash = createHash("sha256").update(parsed.data.tokenHash).digest("hex");
+      const { error: consumeError } = await supabase.rpc("consume_staff_setup_token", {
+        p_setup_token_hash: setupTokenHash,
+      });
+      if (consumeError) {
+        return apiError("The setup link is invalid or expired.", 400);
+      }
+    }
+
+    const { error: acceptError } = await supabase.rpc("accept_farm_invitations");
+    if (acceptError) {
+      console.error("Failed to finalize staff invitation:", acceptError.code);
+      return apiError("Password changed, but the staff invitation could not be finalized.", 500);
+    }
 
     return NextResponse.json({ data: { passwordChanged: true } });
   } catch (error) {

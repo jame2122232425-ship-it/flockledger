@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signUpSchema } from "@/lib/validation/auth";
+import { attemptKey, getClientIp } from "@/lib/security";
 
 export async function POST(request: NextRequest) {
   let body: unknown;
@@ -16,6 +17,14 @@ export async function POST(request: NextRequest) {
 
   try {
     const supabase = await createSupabaseServerClient();
+    const keyHash = attemptKey(getClientIp(request), parsed.data.email.toLowerCase());
+    const { data: allowed, error: limitError } = await supabase.rpc(
+      "check_auth_attempt",
+      { p_scope: "sign-up", p_key_hash: keyHash, p_limit: 5, p_window_seconds: 3600 },
+    );
+    if (limitError) return apiError("Account creation is temporarily unavailable.", 503);
+    if (!allowed) return apiError("Too many account creation attempts. Try again later.", 429);
+
     const { data, error } = await supabase.auth.signUp({
       email: parsed.data.email,
       password: parsed.data.password,
@@ -23,6 +32,11 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
+      await supabase.rpc("record_auth_attempt", {
+        p_scope: "sign-up",
+        p_key_hash: keyHash,
+        p_window_seconds: 3600,
+      });
       if (error.status === 422) return apiError("Unable to create account with those details.", 400);
       console.error("Supabase sign-up failed:", error.status);
       return apiError("Could not create account.", 500);

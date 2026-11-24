@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 const createSchema = z.object({
   farmId: z.string().uuid(),
@@ -24,6 +29,8 @@ const fields =
   "id, farm_id, batch_id, record_date, age_days, birds_weighed, total_weight_g, lightest_g, heaviest_g, target_g, uniform_count, initials, created_at";
 
 export async function GET(request: NextRequest) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const farmId = request.nextUrl.searchParams.get("farmId");
   const batchId = request.nextUrl.searchParams.get("batchId");
   const querySchema = z.object({ farmId: z.string().uuid(), batchId: z.string().uuid().optional() });
@@ -35,10 +42,13 @@ export async function GET(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
 
-    let request = supabase.from("weight_records").select(fields)
-      .eq("farm_id", query.data.farmId).order("record_date", { ascending: false });
+    let request = supabase.from("weight_records").select(fields, { count: "exact" })
+      .eq("farm_id", query.data.farmId)
+      .order("record_date", { ascending: false })
+      .order("id", { ascending: false });
     if (query.data.batchId) request = request.eq("batch_id", query.data.batchId);
-    const { data, error } = await request;
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await request.range(from, to);
     if (error) {
       console.error("Failed to load weight records:", error.code);
       return apiError("Could not load weight records.", 500);
@@ -49,6 +59,7 @@ export async function GET(request: NextRequest) {
         average_g: record.total_weight_g / record.birds_weighed,
         uniformity: record.uniform_count == null ? null : record.uniform_count / record.birds_weighed,
       })),
+      pagination: paginationMetadata(count ?? 0, pagination),
     });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {

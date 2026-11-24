@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
+import {
   dailyRecordCreateSchema,
   dailyRecordListQuerySchema,
 } from "@/lib/validation/daily-records";
@@ -10,6 +15,8 @@ const DAILY_FIELDS =
   "id, farm_id, batch_id, record_date, dead, culled, feed_given_kg, feed_left_kg, water_liters, temp_min_c, temp_max_c, litter, remarks, initials, created_at";
 
 export async function GET(request: NextRequest) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const parsedQuery = dailyRecordListQuerySchema.safeParse({
     farmId: request.nextUrl.searchParams.get("farmId"),
     batchId: request.nextUrl.searchParams.get("batchId") ?? undefined,
@@ -37,20 +44,25 @@ export async function GET(request: NextRequest) {
 
     let query = supabase
       .from("daily_records")
-      .select(DAILY_FIELDS)
+      .select(DAILY_FIELDS, { count: "exact" })
       .eq("farm_id", parsedQuery.data.farmId)
-      .order("record_date", { ascending: false });
+      .order("record_date", { ascending: false })
+      .order("id", { ascending: false });
 
     if (parsedQuery.data.batchId) query = query.eq("batch_id", parsedQuery.data.batchId);
     if (parsedQuery.data.from) query = query.gte("record_date", parsedQuery.data.from);
     if (parsedQuery.data.to) query = query.lte("record_date", parsedQuery.data.to);
 
-    const { data, error } = await query;
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await query.range(from, to);
     if (error) {
       console.error("Failed to list daily records:", error.code);
       return apiError("Could not load daily records.", 500);
     }
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      pagination: paginationMetadata(count ?? 0, pagination),
+    });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {
       return apiError(error.message, 503);

@@ -4,6 +4,12 @@ import { apiError, isUuid } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createHash, randomBytes } from "node:crypto";
+import { attemptKey, getClientIp } from "@/lib/security";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 const invitationSchema = z.object({
   email: z.email().transform((email) => email.trim().toLowerCase()),
@@ -14,7 +20,9 @@ const invitationSchema = z.object({
 
 type RouteContext = { params: Promise<{ farmId: string }> };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const { farmId } = await context.params;
   if (!isUuid(farmId)) return apiError("Invalid farm ID.", 400);
 
@@ -22,17 +30,23 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    const { data, error } = await supabase
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await supabase
       .from("farm_invitations")
-      .select("id, email, role, status, created_at")
+      .select("id, email, role, status, created_at", { count: "exact" })
       .eq("farm_id", farmId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to);
     if (error) {
       if (error.code === "42501") return apiError("Only farm owners can view invitations.", 403);
       console.error("Failed to load invitations:", error.code);
       return apiError("Could not load invitations.", 500);
     }
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      pagination: paginationMetadata(count ?? 0, pagination),
+    });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) return apiError(error.message, 503);
     console.error("Unexpected invitation list error:", error);
@@ -56,6 +70,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
+    const keyHash = attemptKey(getClientIp(request), user.id);
+    const { data: allowed, error: limitError } = await supabase.rpc(
+      "check_auth_attempt",
+      { p_scope: "staff-invite", p_key_hash: keyHash, p_limit: 20, p_window_seconds: 3600 },
+    );
+    if (limitError) return apiError("Staff provisioning is temporarily unavailable.", 503);
+    if (!allowed) return apiError("Too many staff invitations. Try again later.", 429);
 
     const { data: ownerMembership, error: ownerError } = await supabase
       .from("farm_memberships")
@@ -83,7 +104,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       },
     });
     if (createError) {
-      if (createError.status === 422) return apiError("A user with this email already exists.", 409);
+      if (createError.status === 422) return apiError("Could not create the staff account.", 409);
       console.error("Failed to create staff auth account:", createError.status);
       return apiError("Could not create staff account.", 500);
     }
@@ -129,6 +150,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .single();
     if (error) {
       if (error.code === "42501") return apiError("Only farm owners can invite staff.", 403);
+      await admin
+        .from("farm_memberships")
+        .delete()
+        .eq("farm_id", farmId)
+        .eq("user_id", createdUser.user.id);
+      await admin.auth.admin.deleteUser(createdUser.user.id);
       console.error("Failed to create invitation:", error.code);
       return apiError("Could not create invitation.", 500);
     }

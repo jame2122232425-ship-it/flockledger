@@ -275,6 +275,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .filter-tabs button.selected { color: #386949; background: #eef4ed; font-weight: 650; }
 .filter-tabs button span { color: #99a19a; font-size: 9px; }
 .table-hint { color: #929b94; font-size: 9px; white-space: nowrap; }
+.pagination-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 12px 16px; color: #69756c; font-size: 10px; }
+.pagination-controls .button { min-height: 32px; padding: 6px 10px; font-size: 10px; }
+.pagination-controls .button:disabled { cursor: not-allowed; opacity: .5; }
 .table-title { margin: 0; color: #3c493f; font-size: 12px; }
 .table-subtitle { margin: 4px 0 0; color: #929b94; font-size: 9px; }
 .table-scroll { overflow-x: auto; }
@@ -1012,6 +1015,8 @@ table,
 .marketing-prose { display: grid; gap: 18px; }
 .marketing-prose .marketing-card { padding: 32px; }
 .marketing-prose .marketing-card p:last-child { margin-bottom: 0; }
+.marketing-prose a { color: #15803d; font-weight: 700; text-underline-offset: 3px; }
+.legal-draft-notice { margin: 0; padding: 14px 18px; border-left: 4px solid #f59e0b; border-radius: 0 8px 8px 0; background: #f8fafc; color: #0f172a; font-size: 12px !important; line-height: 1.65; }
 .marketing-inline-cta { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px; border-radius: 12px; background: #15803d; }
 .marketing-inline-cta p { margin: 0; color: #f8fafc; font-size: 16px; font-weight: 750; }
 .marketing-contact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }

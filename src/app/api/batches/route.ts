@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
+import {
   batchCreateSchema,
   batchListQuerySchema,
 } from "@/lib/validation/batches";
@@ -10,6 +15,8 @@ const BATCH_FIELDS =
   "id, farm_id, batch_code, batch_type, rearing_system, house, date_placed, source, strain, chicks_ordered, chicks_received, date_sold_out, status, remarks, created_at";
 
 export async function GET(request: NextRequest) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const parsedQuery = batchListQuerySchema.safeParse({
     farmId: request.nextUrl.searchParams.get("farmId"),
     status: request.nextUrl.searchParams.get("status") ?? undefined,
@@ -28,21 +35,26 @@ export async function GET(request: NextRequest) {
 
     let query = supabase
       .from("batches")
-      .select(BATCH_FIELDS)
+      .select(BATCH_FIELDS, { count: "exact" })
       .eq("farm_id", parsedQuery.data.farmId)
-      .order("date_placed", { ascending: false });
+      .order("date_placed", { ascending: false })
+      .order("id", { ascending: false });
 
     if (parsedQuery.data.status) {
       query = query.eq("status", parsedQuery.data.status);
     }
 
-    const { data, error } = await query;
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await query.range(from, to);
     if (error) {
       console.error("Failed to list batches:", error.code);
       return apiError("Could not load batches.", 500);
     }
 
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      pagination: paginationMetadata(count ?? 0, pagination),
+    });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {
       return apiError(error.message, 503);

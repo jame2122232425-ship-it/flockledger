@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 type CollectionOptions<Schema extends z.ZodType> = {
   table: string;
@@ -16,6 +21,8 @@ export function createFarmRecordCollection<Schema extends z.ZodType>(
   options: CollectionOptions<Schema>,
 ) {
   async function GET(request: NextRequest) {
+    const pagination = parsePagination(request.nextUrl.searchParams);
+    if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
     const parsed = z.object({
       farmId: z.string().uuid(),
       batchId: z.string().uuid().optional(),
@@ -30,18 +37,25 @@ export function createFarmRecordCollection<Schema extends z.ZodType>(
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) return apiError("Authentication required.", 401);
 
-      let query = supabase.from(options.table).select(options.fields)
-        .eq("farm_id", parsed.data.farmId).order(options.orderBy, { ascending: false });
+      let query = supabase.from(options.table).select(options.fields, { count: "exact" })
+        .eq("farm_id", parsed.data.farmId)
+        .order(options.orderBy, { ascending: false })
+        .order("id", { ascending: false });
+      const { from, to } = paginationRange(pagination);
+      query = query.range(from, to);
       if (options.supportsBatchFilter && parsed.data.batchId) {
         query = query.eq("batch_id", parsed.data.batchId);
       }
 
-      const { data, error } = await query;
+      const { data, error, count } = await query;
       if (error) {
         console.error(`Failed to load ${options.table}:`, error.code);
         return apiError("Could not load records.", 500);
       }
-      return NextResponse.json({ data });
+      return NextResponse.json({
+        data,
+        pagination: paginationMetadata(count ?? 0, pagination),
+      });
     } catch (error) {
       if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {
         return apiError(error.message, 503);

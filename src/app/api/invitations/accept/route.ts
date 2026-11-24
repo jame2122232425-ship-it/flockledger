@@ -1,12 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { attemptKey, getClientIp } from "@/lib/security";
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
+    const keyHash = attemptKey(getClientIp(request), user.id);
+    const { data: allowed, error: limitError } = await supabase.rpc(
+      "check_auth_attempt",
+      { p_scope: "invitation-accept", p_key_hash: keyHash, p_limit: 20, p_window_seconds: 900 },
+    );
+    if (limitError) return apiError("Invitation acceptance is temporarily unavailable.", 503);
+    if (!allowed) return apiError("Too many invitation attempts. Try again later.", 429);
 
     const { data, error } = await supabase.rpc("accept_farm_invitations");
     if (error) {

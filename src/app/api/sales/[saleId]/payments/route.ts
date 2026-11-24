@@ -3,6 +3,12 @@ import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { salePaymentCreateSchema } from "@/lib/validation/sales";
+import { payloadHash, requireIdempotencyKey } from "@/lib/security";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 type RouteContext = { params: Promise<{ saleId: string }> };
 
@@ -15,6 +21,8 @@ async function getSaleId(context: RouteContext) {
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const saleId = await getSaleId(context);
   const farmId = z.string().uuid().safeParse(request.nextUrl.searchParams.get("farmId"));
   if (!saleId.success || !farmId.success) {
@@ -37,17 +45,23 @@ export async function GET(request: NextRequest, context: RouteContext) {
     }
     if (!sale) return apiError("Sale not found.", 404);
 
-    const { data, error } = await supabase.from("sale_payments")
-      .select(paymentFields)
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await supabase.from("sale_payments")
+      .select(paymentFields, { count: "exact" })
       .eq("farm_id", farmId.data)
       .eq("sale_id", saleId.data)
       .order("payment_date", { ascending: false })
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to);
     if (error) {
       console.error("Failed to load sale payments:", error.code);
       return apiError("Could not load payment history.", 500);
     }
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      data,
+      pagination: paginationMetadata(count ?? 0, pagination),
+    });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {
       return apiError(error.message, 503);
@@ -74,6 +88,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       { status: 400 },
     );
   }
+  const idempotencyKey = requireIdempotencyKey(request);
+  if (!idempotencyKey) {
+    return apiError("Provide an Idempotency-Key header.", 400);
+  }
 
   try {
     const supabase = await createSupabaseServerClient();
@@ -81,13 +99,21 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (authError || !user) return apiError("Authentication required.", 401);
 
     const payment = parsed.data;
-    const { data, error } = await supabase.from("sale_payments").insert({
-      farm_id: payment.farmId,
-      sale_id: saleId.data,
-      payment_date: payment.paymentDate,
-      amount_kes: payment.amountKes,
-      reference: payment.reference || null,
-    }).select(paymentFields).single();
+    const { data, error } = await supabase.rpc("create_sale_payment_idempotent", {
+      p_farm_id: payment.farmId,
+      p_sale_id: saleId.data,
+      p_payment_date: payment.paymentDate,
+      p_amount_kes: payment.amountKes,
+      p_reference: payment.reference || null,
+      p_idempotency_key: idempotencyKey,
+      p_payload_hash: payloadHash({
+        farmId: payment.farmId,
+        saleId: saleId.data,
+        paymentDate: payment.paymentDate,
+        amountKes: payment.amountKes,
+        reference: payment.reference || null,
+      }),
+    });
     if (error) {
       if (error.code === "42501") return apiError("You cannot record payments for this farm.", 403);
       if (error.code === "P0001") {

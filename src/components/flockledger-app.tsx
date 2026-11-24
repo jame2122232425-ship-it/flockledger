@@ -1,12 +1,36 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { generateBatchCode } from "@/lib/batches/batch-code";
 import { dailyRecordCreateSchema } from "@/lib/validation/daily-records";
-import { saleCreateSchema, salePaymentCreateSchema } from "@/lib/validation/sales";
-import type { RevenueSale, RevenueSaleStatus } from "@/lib/revenue/sales";
+import { Icon } from "@/components/app-icon";
+import { Metric } from "@/components/metric-card";
+import { RequestError, request } from "@/lib/client/request";
+import { formatKes, formatNumber, shortDate, todayInNairobi } from "@/lib/format";
+import type { PageMetadata } from "@/lib/api/pagination";
+import type {
+  Batch,
+  DailyRecord,
+  DashboardPayload,
+  FarmBatch,
+  FarmSummary,
+} from "@/lib/farm/types";
+
+const BatchesPage = dynamic(
+  () => import("@/components/farm-list-pages").then((module) => module.BatchesPage),
+  { loading: () => <div className="empty-inline">Loading batches…</div> },
+);
+const DailyPage = dynamic(
+  () => import("@/components/farm-list-pages").then((module) => module.DailyPage),
+  { loading: () => <div className="empty-inline">Loading daily records…</div> },
+);
+const RevenuePage = dynamic(
+  () => import("@/components/revenue-page").then((module) => module.RevenuePage),
+  { loading: () => <div className="empty-inline">Loading revenue ledger…</div> },
+);
 
 type Farm = {
   id: string;
@@ -15,87 +39,6 @@ type Farm = {
   timezone: string;
   opening_cash_balance_kes: number;
   role: string;
-};
-
-type Batch = {
-  batch_id: string;
-  batch_code: string;
-  batch_type: "Broiler" | "Kienyeji";
-  house: string | null;
-  date_placed: string;
-  chicks_received: number;
-  status: "running" | "closed";
-  dead: number;
-  culled: number;
-  birds_sold: number;
-  feed_consumed_kg: number;
-  revenue_kes: number;
-  outstanding_kes: number;
-  fcr: number | null;
-  mortality_percent: number;
-  age_days: number;
-};
-
-type DailyRecord = {
-  id: string;
-  batch_id: string;
-  record_date: string;
-  dead: number;
-  culled: number;
-  feed_given_kg: number;
-  feed_left_kg: number;
-  water_liters: number;
-  temp_min_c: number | null;
-  temp_max_c: number | null;
-  litter: string | null;
-  remarks: string | null;
-  initials: string | null;
-};
-
-type FarmBatch = {
-  id: string;
-  batch_code: string;
-  batch_type: "Broiler" | "Kienyeji";
-  house: string | null;
-  status: "running" | "closed";
-};
-
-type FarmSummary = {
-  batches_recorded: number;
-  birds_placed: number;
-  revenue_kes: number;
-  total_expenses_kes: number;
-  feed_stock_on_hand_kg: number;
-  accounts_receivable_kes: number;
-  cash_balance_kes: number;
-};
-
-type DashboardPayload = {
-  data: Batch[];
-  summary: FarmSummary | null;
-};
-
-type RevenueSummary = {
-  sales_kes: number;
-  received_kes: number;
-  outstanding_kes: number;
-  sale_count: number;
-};
-
-type RevenueFilters = {
-  from: string;
-  to: string;
-  batchId: string;
-  paymentStatus: RevenueSaleStatus | "";
-  search: string;
-};
-
-type SalePayment = {
-  id: string;
-  payment_date: string;
-  amount_kes: number | string;
-  reference: string | null;
-  created_at: string;
 };
 
 type Tab = "overview" | "batches" | "daily" | "revenue";
@@ -128,74 +71,22 @@ function navigateToTab(tab: Tab) {
   window.dispatchEvent(new Event(TAB_CHANGE_EVENT));
 }
 
-class RequestError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
+async function requestAllPages<T>(url: string): Promise<T[]> {
+  const parsedUrl = new URL(url, window.location.origin);
+  const data: T[] = [];
+  let page = 1;
+  let hasMore = true;
+  while (hasMore) {
+    parsedUrl.searchParams.set("page", String(page));
+    parsedUrl.searchParams.set("pageSize", "100");
+    const result = await request<{ data: T[]; pagination: PageMetadata }>(
+      `${parsedUrl.pathname}${parsedUrl.search}`,
+    );
+    data.push(...result.data);
+    hasMore = result.pagination.hasMore;
+    page += 1;
   }
-}
-
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      ...init,
-      credentials: "same-origin",
-      headers: {
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...init?.headers,
-      },
-    });
-  } catch {
-    throw new RequestError("Could not reach FlockLedger. Check your connection and try again.", 0);
-  }
-
-  let payload: { data?: T; summary?: FarmSummary | null; error?: string };
-  try {
-    payload = (await response.json()) as typeof payload;
-  } catch {
-    throw new RequestError("The server returned an unreadable response.", response.status);
-  }
-  if (!response.ok) {
-    throw new RequestError(payload.error ?? "The request could not be completed.", response.status);
-  }
-  return payload as T;
-}
-
-function formatKes(value: number | null | undefined) {
-  return new Intl.NumberFormat("en-KE", {
-    style: "currency",
-    currency: "KES",
-    maximumFractionDigits: 0,
-  }).format(Number(value ?? 0));
-}
-
-function formatNumber(value: number | null | undefined, digits = 0) {
-  return new Intl.NumberFormat("en-KE", { maximumFractionDigits: digits }).format(
-    Number(value ?? 0),
-  );
-}
-
-function todayInNairobi() {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Africa/Nairobi",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "";
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-function shortDate(value: string) {
-  return new Intl.DateTimeFormat("en-KE", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: "Africa/Nairobi",
-  }).format(new Date(`${value}T12:00:00+03:00`));
+  return data;
 }
 
 function normalizeFarm(row: unknown): Farm | null {
@@ -208,34 +99,6 @@ function normalizeFarm(row: unknown): Farm | null {
   const farm = Array.isArray(entry.farms) ? entry.farms[0] : entry.farms;
   if (!farm?.id || !entry.role) return null;
   return { ...farm, role: entry.role };
-}
-
-function Icon({ name }: { name: "overview" | "batch" | "daily" | "bird" | "feed" | "cash" | "sales" }) {
-  const paths: Record<typeof name, React.ReactNode> = {
-    overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /></>,
-    batch: <><path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z" /><path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12v8.5" /></>,
-    daily: <><rect x="4" y="5" width="16" height="16" rx="2" /><path d="M8 3v4M16 3v4M4 10h16M8 14h3M8 17h6" /></>,
-    bird: <><path d="M7 14c-2.2 0-4-1.6-4-3.5S4.8 7 7 7c1.7 0 3.2.9 3.8 2.2 2.1-.6 4.2-.2 5.7 1.2l3.5-.2-1.7 2.1c.1 3.3-2.7 5.7-6.2 5.7H9l-3 2v-3.2A5.2 5.2 0 0 1 4 14.5" /><circle cx="7" cy="10" r=".7" fill="currentColor" stroke="none" /></>,
-    feed: <><path d="M4 7h16l-1.5 13h-13zM7 7l1-4h8l1 4M8 11h8" /></>,
-    cash: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 9h.01M17 15h.01M12 9v6M10 11h3.5a1.5 1.5 0 0 1 0 3H10" /></>,
-    sales: <><path d="M4 19V5M4 19h17M8 15l4-4 3 2 5-6" /><path d="M16 7h4v4" /></>,
-  };
-
-  return (
-    <svg
-      aria-hidden="true"
-      width={24}
-      height={24}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {paths[name]}
-    </svg>
-  );
 }
 
 function FarmPicker({
@@ -355,6 +218,12 @@ export default function FlockLedgerApp({
   const [teamTemporaryPassword, setTeamTemporaryPassword] = useState("");
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
   const [dailyRecords, setDailyRecords] = useState<DailyRecord[]>([]);
+  const [dailyRefreshVersion, setDailyRefreshVersion] = useState(0);
+  const [dailyRecordLookup, setDailyRecordLookup] = useState<{
+    key: string;
+    record?: DailyRecord;
+    error?: string;
+  } | null>(null);
   const [batchType, setBatchType] = useState<"Broiler" | "Kienyeji">("Broiler");
   const [batchDatePlaced, setBatchDatePlaced] = useState("");
   const [batchHouse, setBatchHouse] = useState("");
@@ -424,14 +293,53 @@ export default function FlockLedgerApp({
   );
   const batches = useMemo(() => dashboard?.data ?? [], [dashboard]);
   const runningBatches = farmBatches.filter((batch) => batch.status === "running");
-  const existingDailyRecord = dailyRecords.find(
-    (record) => record.batch_id === dailyBatchId && record.record_date === dailyRecordDate,
-  );
+  const dailyRecordLookupKey = `${farmId}:${dailyBatchId}:${dailyRecordDate}`;
+  const existingDailyRecord = dailyRecordLookup?.key === dailyRecordLookupKey
+    ? dailyRecordLookup.record
+    : undefined;
+  const dailyRecordLookupLoading = dialog === "daily"
+    && Boolean(farmId && dailyBatchId && dailyRecordDate)
+    && dailyRecordLookup?.key !== dailyRecordLookupKey;
+  const dailyRecordLookupFailed = dailyRecordLookup?.key === dailyRecordLookupKey
+    && Boolean(dailyRecordLookup.error);
   const canEditRecords = activeFarm?.role === "owner" || activeFarm?.role === "manager";
-  const batchNames = useMemo(
-    () => new Map(batches.map((batch) => [batch.batch_id, batch.batch_code])),
-    [batches],
-  );
+  const batchNames = useMemo(() => new Map([
+    ...batches.map((batch) => [batch.batch_id, batch.batch_code] as const),
+    ...farmBatches.map((batch) => [batch.id, batch.batch_code] as const),
+  ]), [batches, farmBatches]);
+
+  useEffect(() => {
+    if (dialog !== "daily" || !farmId || !dailyBatchId || !dailyRecordDate) return;
+
+    let active = true;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      farmId,
+      batchId: dailyBatchId,
+      from: dailyRecordDate,
+      to: dailyRecordDate,
+      page: "1",
+      pageSize: "1",
+    });
+    request<{ data: DailyRecord[] }>(`/api/daily-records?${params.toString()}`, {
+      signal: controller.signal,
+    }).then((result) => {
+      if (active) setDailyRecordLookup({
+        key: dailyRecordLookupKey,
+        record: result.data[0],
+      });
+    }).catch((error: unknown) => {
+      if (active) {
+        const message = error instanceof Error ? error.message : "Could not check the existing daily record.";
+        setDailyRecordLookup({ key: dailyRecordLookupKey, error: message });
+        setDialogError(message);
+      }
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [dailyBatchId, dailyRecordDate, dailyRecordLookupKey, dialog, farmId]);
 
   function openDialog(nextDialog: "batch" | "daily" | "farm" | "team") {
     setDialogError("");
@@ -473,8 +381,8 @@ export default function FlockLedgerApp({
   const loadFarms = useCallback(async (preferredFarmId?: string) => {
     setLoadingDashboard(true);
     await request<{ data: { accepted: number } }>("/api/invitations/accept", { method: "POST" }).catch(() => undefined);
-    const payload = await request<{ data: unknown[] }>("/api/farms");
-    const loadedFarms = payload.data.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
+    const farmRows = await requestAllPages<unknown>(`${window.location.origin}/api/farms`);
+    const loadedFarms = farmRows.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
     const savedFarmId = preferredFarmId ?? window.localStorage.getItem(ACTIVE_FARM_STORAGE_KEY);
     setFarms(loadedFarms);
     setFarmBatches([]);
@@ -494,10 +402,10 @@ export default function FlockLedgerApp({
     let active = true;
     request<{ data: { accepted: number } }>("/api/invitations/accept", { method: "POST" })
       .catch(() => ({ data: { accepted: 0 } }))
-      .then(() => request<{ data: unknown[] }>("/api/farms"))
-      .then((payload) => {
+      .then(() => requestAllPages<unknown>(`${window.location.origin}/api/farms`))
+      .then((farmRows) => {
         if (!active) return;
-        const loadedFarms = payload.data.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
+        const loadedFarms = farmRows.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
         const savedFarmId = window.localStorage.getItem(ACTIVE_FARM_STORAGE_KEY);
         setFarms(loadedFarms);
         setFarmId(
@@ -529,13 +437,13 @@ export default function FlockLedgerApp({
     const requestId = ++dashboardRequestId.current;
     const [dashboardResult, batchesResult, dailyResult] = await Promise.allSettled([
       request<DashboardPayload>(
-        `/api/dashboard?farmId=${encodeURIComponent(selectedFarmId)}`,
+        `/api/dashboard?farmId=${encodeURIComponent(selectedFarmId)}&pageSize=25`,
       ),
-      request<{ data: FarmBatch[] }>(
+      requestAllPages<FarmBatch>(
         `/api/batches?farmId=${encodeURIComponent(selectedFarmId)}`,
       ),
-      request<{ data: DailyRecord[] }>(
-        `/api/daily-records?farmId=${encodeURIComponent(selectedFarmId)}`,
+      requestAllPages<DailyRecord>(
+        `/api/daily-records?farmId=${encodeURIComponent(selectedFarmId)}&from=${todayInNairobi()}&to=${todayInNairobi()}`,
       ),
     ]);
     if (requestId !== dashboardRequestId.current) return;
@@ -550,7 +458,7 @@ export default function FlockLedgerApp({
         : "Could not load farm performance.");
     }
     if (batchesResult.status === "fulfilled") {
-      setFarmBatches(batchesResult.value.data);
+      setFarmBatches(batchesResult.value);
     } else {
       setFarmBatches([]);
       errors.push(batchesResult.reason instanceof Error
@@ -558,7 +466,8 @@ export default function FlockLedgerApp({
         : "Could not load farm batches.");
     }
     if (dailyResult.status === "fulfilled") {
-      setDailyRecords(dailyResult.value.data);
+      setDailyRecords(dailyResult.value);
+      setDailyRefreshVersion((version) => version + 1);
     } else {
       setDailyRecords([]);
       errors.push(dailyResult.reason instanceof Error
@@ -676,15 +585,15 @@ export default function FlockLedgerApp({
     setBusy(true);
     try {
       const [membersResult, invitationsResult] = await Promise.all([
-        request<{ data: Array<{ user_id: string; role: string; created_at: string }> }>(
-          `/api/farms/${encodeURIComponent(activeFarm.id)}/members`,
+        requestAllPages<{ user_id: string; role: string; created_at: string }>(
+          `${window.location.origin}/api/farms/${encodeURIComponent(activeFarm.id)}/members`,
         ),
-        request<{ data: Array<{ id: string; email: string; role: string; status: string }> }>(
-          `/api/farms/${encodeURIComponent(activeFarm.id)}/invitations`,
+        requestAllPages<{ id: string; email: string; role: string; status: string }>(
+          `${window.location.origin}/api/farms/${encodeURIComponent(activeFarm.id)}/invitations`,
         ),
       ]);
-      setTeamMembers(membersResult.data);
-      setTeamInvitations(invitationsResult.data);
+      setTeamMembers(membersResult);
+      setTeamInvitations(invitationsResult);
     } catch (error) {
       setTeamError(error instanceof Error ? error.message : "Could not load team details.");
     } finally {
@@ -836,9 +745,7 @@ export default function FlockLedgerApp({
       setDialogError(parsedBody.error.issues.map((issue) => issue.message).join(" "));
       return;
     }
-    const existing = dailyRecords.find(
-      (record) => record.batch_id === body.batchId && record.record_date === body.recordDate,
-    );
+    const existing = existingDailyRecord;
     setBusy(true);
     try {
       if (existing) {
@@ -1056,7 +963,8 @@ export default function FlockLedgerApp({
           ) : tab === "overview" ? (
             <Overview
               farm={activeFarm}
-              batches={batches}
+              batches={dashboard?.activeBatches ?? []}
+              activeBatchCount={dashboard?.activeBatchCount ?? 0}
               summary={dashboard?.summary ?? null}
               dailyRecords={dailyRecords}
               batchNames={batchNames}
@@ -1065,9 +973,9 @@ export default function FlockLedgerApp({
               onAddDaily={() => openDialog("daily")}
             />
           ) : tab === "batches" ? (
-            <BatchesPage batches={batches} loading={loadingDashboard} onAdd={() => openDialog("batch")} />
+            <BatchesPage farmId={farmId} initialDashboard={dashboard} loading={loadingDashboard} onAdd={() => openDialog("batch")} />
           ) : tab === "daily" ? (
-            <DailyPage records={dailyRecords} batchNames={batchNames} loading={loadingDashboard} onAdd={() => openDialog("daily")} />
+            <DailyPage farmId={farmId} batchNames={batchNames} refreshVersion={dailyRefreshVersion} onAdd={() => openDialog("daily")} />
           ) : (
             <RevenuePage
               farmId={activeFarm.id}
@@ -1246,8 +1154,8 @@ export default function FlockLedgerApp({
                   <section className="daily-form-section flock-section">
                     <div className="form-section-heading"><span>01</span><div><h3>Flock and date</h3><p>One daily log per batch, per date.</p></div></div>
                     <div className="form-grid">
-                      <label>Active batch<select name="batchId" required value={dailyBatchId} onChange={(event) => setDailyBatchId(event.target.value)}><option value="" disabled>Select a running batch</option>{runningBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.batch_code} · {batch.batch_type}{batch.house ? ` · ${batch.house}` : ""}</option>)}</select></label>
-                      <label>Date<input name="recordDate" type="date" required value={dailyRecordDate} onChange={(event) => setDailyRecordDate(event.target.value)} /></label>
+                      <label>Active batch<select name="batchId" required value={dailyBatchId} onChange={(event) => { setDialogError(""); setDailyBatchId(event.target.value); }}><option value="" disabled>Select a running batch</option>{runningBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.batch_code} · {batch.batch_type}{batch.house ? ` · ${batch.house}` : ""}</option>)}</select></label>
+                      <label>Date<input name="recordDate" type="date" required value={dailyRecordDate} onChange={(event) => { setDialogError(""); setDailyRecordDate(event.target.value); }} /></label>
                     </div>
                   </section>
                   <section className="daily-form-section">
@@ -1291,7 +1199,7 @@ export default function FlockLedgerApp({
                   {!runningBatches.length && <p className="inline-error">There are no running batches to record against. Create a batch first.</p>}
                   {dialogError && <p className="inline-error" role="alert">{dialogError}</p>}
                 </div>
-                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy || !runningBatches.length || (Boolean(existingDailyRecord) && !canEditRecords)}>{busy ? "Saving…" : existingDailyRecord ? canEditRecords ? "Update daily record" : "Already recorded" : "Save daily record"}</button></div>
+                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy || dailyRecordLookupLoading || dailyRecordLookupFailed || !runningBatches.length || (Boolean(existingDailyRecord) && !canEditRecords)}>{busy ? "Saving…" : dailyRecordLookupLoading ? "Checking record…" : existingDailyRecord ? canEditRecords ? "Update daily record" : "Already recorded" : "Save daily record"}</button></div>
               </form>
             )}
           </section>
@@ -1304,6 +1212,7 @@ export default function FlockLedgerApp({
 function Overview({
   farm,
   batches,
+  activeBatchCount,
   summary,
   dailyRecords,
   batchNames,
@@ -1313,6 +1222,7 @@ function Overview({
 }: {
   farm: Farm;
   batches: Batch[];
+  activeBatchCount: number;
   summary: FarmSummary | null;
   dailyRecords: DailyRecord[];
   batchNames: Map<string, string>;
@@ -1320,7 +1230,6 @@ function Overview({
   onTabChange: (tab: Tab) => void;
   onAddDaily: () => void;
 }) {
-  const active = batches.filter((batch) => batch.status === "running");
   const today = todayInNairobi();
   const todaysRecords = dailyRecords.filter((record) => record.record_date === today);
 
@@ -1332,7 +1241,7 @@ function Overview({
       </div>
       <div className="welcome-banner">
         <span className="banner-art"><Icon name="bird" /></span>
-        <div><p className="banner-kicker">YOUR FARM, AT A GLANCE</p><h2>{active.length ? `${active.length} active ${active.length === 1 ? "batch" : "batches"} in progress` : "Your next batch starts here"}</h2><p>{active.length ? "Keep your daily records consistent to make performance insights more useful." : "Create your first batch to start tracking flock performance."}</p></div>
+        <div><p className="banner-kicker">YOUR FARM, AT A GLANCE</p><h2>{activeBatchCount ? `${activeBatchCount} active ${activeBatchCount === 1 ? "batch" : "batches"} in progress` : "Your next batch starts here"}</h2><p>{activeBatchCount ? "Keep your daily records consistent to make performance insights more useful." : "Create a batch record to start tracking flock performance."}</p></div>
         <button className="banner-button" type="button" onClick={() => onTabChange("batches")}>View batches <span aria-hidden="true">→</span></button>
       </div>
       <section className="metric-grid" aria-label="Farm metrics">
@@ -1344,9 +1253,9 @@ function Overview({
       <div className="content-grid">
         <section className="content-card batch-card">
           <div className="card-heading"><div><p className="eyebrow">YOUR FLOCK</p><h2>Active batches</h2></div><button className="text-button" type="button" onClick={() => onTabChange("batches")}>All batches <span aria-hidden="true">→</span></button></div>
-          {loading ? <div className="empty-inline">Loading your latest farm data…</div> : active.length ? (
+          {loading ? <div className="empty-inline">Loading your latest farm data…</div> : batches.length ? (
             <div className="batch-list">
-              {active.slice(0, 4).map((batch) => {
+              {batches.slice(0, 4).map((batch) => {
                 const remaining = Math.max(batch.chicks_received - batch.dead - batch.culled - batch.birds_sold, 0);
                 const survival = batch.chicks_received ? (remaining / batch.chicks_received) * 100 : 0;
                 return (
@@ -1378,479 +1287,6 @@ function Overview({
   );
 }
 
-function Metric({ icon, label, value, note, tone, onClick }: { icon: "bird" | "cash" | "feed" | "sales"; label: string; value: string; note: string; tone: string; onClick?: () => void }) {
-  const content = (
-    <>
-      <div className="metric-top"><span className={`metric-icon ${tone}`}><Icon name={icon} /></span><span className="metric-label">{label}</span></div>
-      <strong className="metric-value">{value}</strong><span className="metric-note">{note}</span>
-    </>
-  );
-
-  return onClick
-    ? <button className="metric-card metric-card-button" type="button" onClick={onClick} aria-label={`View revenue. ${value} revenue recorded. ${note}`}>{content}</button>
-    : <article className="metric-card">{content}</article>;
-}
-
 function EmptyState({ title, detail, action, onClick }: { title: string; detail: string; action: string; onClick: () => void }) {
   return <div className="empty-state"><span className="empty-illustration"><Icon name="bird" /></span><strong>{title}</strong><p>{detail}</p><button className="text-button" type="button" onClick={onClick}>{action} <span aria-hidden="true">→</span></button></div>;
-}
-
-function BatchesPage({ batches, loading, onAdd }: { batches: Batch[]; loading: boolean; onAdd: () => void }) {
-  const [filter, setFilter] = useState<"all" | "running" | "closed">("all");
-  const visible = batches.filter((batch) => filter === "all" || batch.status === filter);
-  return (
-    <>
-      <div className="page-heading">
-        <div><p className="eyebrow">FLOCK MANAGEMENT</p><h1>Your batches</h1><p className="page-subtitle">Follow every flock from placement through closeout.</p></div>
-        <button className="button button-primary" type="button" onClick={onAdd}>New batch</button>
-      </div>
-      <section className="content-card table-card">
-        <div className="table-toolbar"><div className="filter-tabs" role="group" aria-label="Filter batches">{(["all", "running", "closed"] as const).map((item) => <button key={item} type="button" className={filter === item ? "selected" : ""} onClick={() => setFilter(item)}>{item === "all" ? "All batches" : item === "running" ? "Active" : "Closed"} <span>{item === "all" ? batches.length : batches.filter((batch) => batch.status === item).length}</span></button>)}</div><span className="table-hint">Showing {visible.length} {visible.length === 1 ? "batch" : "batches"}</span></div>
-        {loading ? <div className="empty-inline">Loading batches…</div> : visible.length ? (
-          <div className="table-scroll"><table><thead><tr><th>Batch</th><th>Status</th><th>Placed</th><th>Birds placed</th><th>Age</th><th>Mortality</th><th>FCR</th></tr></thead><tbody>{visible.map((batch) => <tr key={batch.batch_id}><td><span className="table-batch"><span className={`table-batch-mark ${batch.batch_type === "Broiler" ? "broiler" : "kienyeji"}`}><Icon name="bird" /></span><span><strong>{batch.batch_code}</strong><small>{batch.batch_type}{batch.house ? ` · ${batch.house}` : ""}</small></span></span></td><td><span className={`status-pill ${batch.status}`}>{batch.status === "running" ? "Active" : "Closed"}</span></td><td>{shortDate(batch.date_placed)}</td><td>{formatNumber(batch.chicks_received)}</td><td>{batch.status === "running" ? `Day ${formatNumber(batch.age_days)}` : "—"}</td><td>{formatNumber(batch.mortality_percent, 1)}%</td><td>{batch.fcr == null ? "—" : formatNumber(batch.fcr, 2)}</td></tr>)}</tbody></table></div>
-        ) : <EmptyState title={filter === "all" ? "No batches recorded" : `No ${filter} batches`} detail="Create a batch record to begin tracking flock performance." action="Create a batch" onClick={onAdd} />}
-      </section>
-    </>
-  );
-}
-
-function DailyPage({ records, batchNames, loading, onAdd }: { records: DailyRecord[]; batchNames: Map<string, string>; loading: boolean; onAdd: () => void }) {
-  return (
-    <>
-      <div className="page-heading">
-        <div><p className="eyebrow">DAILY FARM ROUTINE</p><h1>Daily records</h1><p className="page-subtitle">A clear history of feed, water, flock losses, and house conditions.</p></div>
-        <button className="button button-primary" type="button" onClick={onAdd}>Add daily record</button>
-      </div>
-      <section className="content-card table-card">
-        <div className="table-toolbar"><div><h2 className="table-title">Recent activity</h2><p className="table-subtitle">Most recent records across all batches</p></div><span className="table-hint">{records.length} records</span></div>
-        {loading ? <div className="empty-inline">Loading daily records…</div> : records.length ? (
-          <div className="table-scroll"><table><thead><tr><th>Date</th><th>Batch</th><th>Feed used</th><th>Water</th><th>Deaths</th><th>Culls</th><th>Initials</th></tr></thead><tbody>{records.map((record) => <tr key={record.id}><td>{shortDate(record.record_date)}</td><td><strong>{batchNames.get(record.batch_id) ?? "—"}</strong></td><td>{formatNumber(record.feed_given_kg - record.feed_left_kg, 2)} kg</td><td>{formatNumber(record.water_liters, 1)} L</td><td>{formatNumber(record.dead)}</td><td>{formatNumber(record.culled)}</td><td>{record.initials || "—"}</td></tr>)}</tbody></table></div>
-        ) : <EmptyState title="No daily records yet" detail="Start with today’s activity. Add feed use, water, and flock observations." action="Add daily record" onClick={onAdd} />}
-      </section>
-    </>
-  );
-}
-
-function RevenuePage({
-  farmId,
-  batches,
-  loadingBatches,
-  canRecord,
-  onFeedback,
-}: {
-  farmId: string;
-  batches: FarmBatch[];
-  loadingBatches: boolean;
-  canRecord: boolean;
-  onFeedback: (message: string) => void;
-}) {
-  const [filters, setFilters] = useState<RevenueFilters>({
-    from: "",
-    to: "",
-    batchId: "",
-    paymentStatus: "",
-    search: "",
-  });
-  const [dateRangeInitialized, setDateRangeInitialized] = useState(false);
-  const [rows, setRows] = useState<RevenueSale[]>([]);
-  const [summary, setSummary] = useState<RevenueSummary>({
-    sales_kes: 0,
-    received_kes: 0,
-    outstanding_kes: 0,
-    sale_count: 0,
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [saleDialogOpen, setSaleDialogOpen] = useState(false);
-  const [saleDate, setSaleDate] = useState("");
-  const [saleError, setSaleError] = useState("");
-  const [saleBusy, setSaleBusy] = useState(false);
-  const [paymentSale, setPaymentSale] = useState<RevenueSale | null>(null);
-  const [paymentHistory, setPaymentHistory] = useState<SalePayment[]>([]);
-  const [paymentDate, setPaymentDate] = useState("");
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentError, setPaymentError] = useState("");
-  const [paymentBusy, setPaymentBusy] = useState(false);
-  const requestId = useRef(0);
-
-  useEffect(() => {
-    if (!error) return;
-    const timer = window.setTimeout(() => setError(""), 5000);
-    return () => window.clearTimeout(timer);
-  }, [error]);
-
-  useEffect(() => {
-    if (!saleError) return;
-    const timer = window.setTimeout(() => setSaleError(""), 5000);
-    return () => window.clearTimeout(timer);
-  }, [saleError]);
-
-  useEffect(() => {
-    if (!paymentError) return;
-    const timer = window.setTimeout(() => setPaymentError(""), 5000);
-    return () => window.clearTimeout(timer);
-  }, [paymentError]);
-
-  const runningBatches = batches.filter((batch) => batch.status === "running");
-  const batchNames = useMemo(
-    () => new Map(batches.map((batch) => [batch.id, batch.batch_code])),
-    [batches],
-  );
-  const dateRangeError = Boolean(filters.from && filters.to && filters.from > filters.to)
-    ? "The end date must be on or after the start date."
-    : "";
-  const displayError = dateRangeError || error;
-  const visibleSummary = dateRangeError
-    ? { sales_kes: 0, received_kes: 0, outstanding_kes: 0, sale_count: 0 }
-    : summary;
-
-  useEffect(() => {
-    if (dateRangeInitialized) return;
-    const timer = window.setTimeout(() => {
-      const today = todayInNairobi();
-      setFilters((current) => ({ ...current, from: `${today.slice(0, 7)}-01`, to: today }));
-      setDateRangeInitialized(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [dateRangeInitialized]);
-
-  useEffect(() => {
-    if (!dateRangeInitialized || dateRangeError) return;
-
-    let active = true;
-    const currentRequestId = ++requestId.current;
-    const controller = new AbortController();
-
-    const timer = window.setTimeout(() => {
-      if (!active) return;
-      setLoading(true);
-      setError("");
-      const params = new URLSearchParams({ farmId });
-      if (filters.from) params.set("from", filters.from);
-      if (filters.to) params.set("to", filters.to);
-      if (filters.batchId) params.set("batchId", filters.batchId);
-      if (filters.paymentStatus) params.set("paymentStatus", filters.paymentStatus);
-      if (filters.search.trim()) params.set("search", filters.search.trim());
-
-      request<{ data: RevenueSale[]; summary: RevenueSummary }>(
-        `/api/sales?${params.toString()}`,
-        { signal: controller.signal },
-      ).then((result) => {
-        if (!active || currentRequestId !== requestId.current) return;
-        setRows(result.data);
-        setSummary(result.summary);
-      }).catch((loadError: unknown) => {
-        if (!active || currentRequestId !== requestId.current) return;
-        setRows([]);
-        setSummary({ sales_kes: 0, received_kes: 0, outstanding_kes: 0, sale_count: 0 });
-        setError(loadError instanceof Error ? loadError.message : "Could not load revenue.");
-      }).finally(() => {
-        if (active && currentRequestId === requestId.current) setLoading(false);
-      });
-    }, filters.search ? 250 : 0);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [dateRangeError, dateRangeInitialized, farmId, filters, refreshKey]);
-
-  useEffect(() => {
-    if (!paymentSale) return;
-    let active = true;
-    const params = new URLSearchParams({ farmId });
-    const timer = window.setTimeout(() => {
-      if (!active) return;
-      request<{ data: SalePayment[] }>(
-        `/api/sales/${encodeURIComponent(paymentSale.id)}/payments?${params.toString()}`,
-      ).then((result) => {
-        if (active) setPaymentHistory(result.data);
-      }).catch((loadError: unknown) => {
-        if (active) setPaymentError(loadError instanceof Error ? loadError.message : "Could not load payment history.");
-      }).finally(() => {
-        if (active) setPaymentLoading(false);
-      });
-    }, 0);
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [farmId, paymentSale]);
-
-  function updateFilter<K extends keyof RevenueFilters>(key: K, value: RevenueFilters[K]) {
-    setFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function resetFilters() {
-    const today = todayInNairobi();
-    setFilters({
-      from: `${today.slice(0, 7)}-01`,
-      to: today,
-      batchId: "",
-      paymentStatus: "",
-      search: "",
-    });
-  }
-
-  function openSaleDialog() {
-    setSaleDate(todayInNairobi());
-    setSaleError("");
-    setSaleDialogOpen(true);
-  }
-
-  function openPaymentDialog(sale: RevenueSale) {
-    setPaymentDate(todayInNairobi());
-    setPaymentHistory([]);
-    setPaymentLoading(true);
-    setPaymentError("");
-    setPaymentSale(sale);
-  }
-
-  async function handleSaleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const nullableText = (key: string) => String(form.get(key) ?? "").trim() || null;
-    const parsed = saleCreateSchema.safeParse({
-      farmId,
-      batchId: String(form.get("batchId") ?? ""),
-      saleDate,
-      customer: String(form.get("customer") ?? ""),
-      birdsSold: Number(form.get("birdsSold") || 0),
-      totalWeightKg: Number(form.get("totalWeightKg") || 0),
-      priceBasis: String(form.get("priceBasis") ?? ""),
-      priceKes: Number(form.get("priceKes") || 0),
-      paidKes: Number(form.get("paidKes") || 0),
-      receiptNumber: nullableText("receiptNumber"),
-      remarks: nullableText("remarks"),
-    });
-    if (!parsed.success) {
-      setSaleError(parsed.error.issues.map((issue) => issue.message).join(" "));
-      return;
-    }
-
-    setSaleBusy(true);
-    setSaleError("");
-    try {
-      await request<{ data: RevenueSale }>("/api/sales", {
-        method: "POST",
-        body: JSON.stringify(parsed.data),
-      });
-      setSaleDialogOpen(false);
-      onFeedback(parsed.data.paidKes > 0
-        ? "Sale and initial payment recorded. The payment was added to the cashbook."
-        : "Sale recorded successfully.");
-      setRefreshKey((current) => current + 1);
-    } catch (createError) {
-      setSaleError(createError instanceof Error ? createError.message : "Could not record sale.");
-    } finally {
-      setSaleBusy(false);
-    }
-  }
-
-  async function handlePaymentCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!paymentSale) return;
-    const form = new FormData(event.currentTarget);
-    const parsed = salePaymentCreateSchema.safeParse({
-      farmId,
-      paymentDate,
-      amountKes: Number(form.get("amountKes") || 0),
-      reference: String(form.get("reference") ?? "").trim() || null,
-    });
-    if (!parsed.success) {
-      setPaymentError(parsed.error.issues.map((issue) => issue.message).join(" "));
-      return;
-    }
-
-    setPaymentBusy(true);
-    setPaymentError("");
-    try {
-      await request<{ data: SalePayment }>(
-        `/api/sales/${encodeURIComponent(paymentSale.id)}/payments`,
-        { method: "POST", body: JSON.stringify(parsed.data) },
-      );
-      setPaymentSale(null);
-      onFeedback(`Payment of ${formatKes(parsed.data.amountKes)} recorded and added to the cashbook.`);
-      setRefreshKey((current) => current + 1);
-    } catch (createError) {
-      setPaymentError(createError instanceof Error ? createError.message : "Could not record payment.");
-    } finally {
-      setPaymentBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="page-heading revenue-page-heading">
-        <div>
-          <p className="eyebrow">SALES &amp; RECEIPTS</p>
-          <h1>Revenue</h1>
-          <p className="page-subtitle">Track sales, customer payments, and outstanding balances.</p>
-        </div>
-        <button
-          className="button button-primary"
-          type="button"
-          onClick={openSaleDialog}
-          disabled={!canRecord || loadingBatches || !runningBatches.length}
-          title={!runningBatches.length ? "Create a running batch before recording sales." : undefined}
-        >
-          Record sale
-        </button>
-      </div>
-
-      {!canRecord && (
-        <div className="revenue-permission-note">
-          You can view revenue and payment history. Owners, managers, and accountants can record sales and payments.
-        </div>
-      )}
-
-      <section className="metric-grid revenue-summary-grid" aria-label="Revenue summary">
-        <Metric icon="sales" label="Sales" value={formatKes(visibleSummary.sales_kes)} note={`${formatNumber(visibleSummary.sale_count)} ${visibleSummary.sale_count === 1 ? "ledger entry" : "ledger entries"} in this view`} tone="gold" />
-        <Metric icon="cash" label="Received" value={formatKes(visibleSummary.received_kes)} note="Payments recorded for these sales" tone="green" />
-        <Metric icon="cash" label="Outstanding" value={formatKes(visibleSummary.outstanding_kes)} note="Remaining customer balances" tone="blue" />
-      </section>
-
-      <section className="content-card revenue-filter-card" aria-label="Revenue filters">
-        <div className="revenue-filter-grid">
-          <label>From<input type="date" value={filters.from} max={filters.to || undefined} onChange={(event) => updateFilter("from", event.target.value)} /></label>
-          <label>To<input type="date" value={filters.to} min={filters.from || undefined} onChange={(event) => updateFilter("to", event.target.value)} /></label>
-          <label>Batch<select value={filters.batchId} onChange={(event) => updateFilter("batchId", event.target.value)}><option value="">All batches</option>{batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.batch_code}</option>)}</select></label>
-          <label>Payment status<select value={filters.paymentStatus} onChange={(event) => updateFilter("paymentStatus", event.target.value as RevenueFilters["paymentStatus"])}><option value="">All statuses</option><option value="paid">Paid</option><option value="partial">Partially paid</option><option value="unpaid">Unpaid</option></select></label>
-          <label className="revenue-search-field">Buyer<input type="search" maxLength={128} value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Search buyers" /></label>
-          <button className="revenue-reset-button" type="button" onClick={resetFilters}>Reset filters</button>
-        </div>
-      </section>
-
-      <section className="content-card table-card revenue-ledger-card">
-        <div className="table-toolbar">
-          <div><h2 className="table-title">Sales ledger</h2><p className="table-subtitle">Sales and closed-batch adjustments matching your filters</p></div>
-          <span className="table-hint">{formatNumber(rows.length)} {rows.length === 1 ? "entry" : "entries"}</span>
-        </div>
-        {displayError && <div className="notice error-notice revenue-error" role="alert">{displayError}</div>}
-        {dateRangeError ? (
-          <div className="empty-inline" role="status">Update the date range to view revenue.</div>
-        ) : loading ? (
-          <div className="empty-inline" role="status">Loading revenue…</div>
-        ) : rows.length ? (
-          <>
-            <div className="table-scroll revenue-desktop-ledger">
-              <table>
-                <thead><tr><th>Date</th><th>Buyer / entry</th><th>Batch</th><th>Quantity</th><th>Sales</th><th>Received</th><th>Outstanding</th><th>Status</th><th>Actions</th></tr></thead>
-                <tbody>
-                  {rows.map((sale) => (
-                    <tr key={sale.id} className={sale.is_adjustment ? "revenue-adjustment-row" : ""}>
-                      <td>{shortDate(sale.sale_date)}</td>
-                      <td><span className="revenue-buyer-cell"><strong>{sale.customer}</strong><small>{sale.is_adjustment ? sale.remarks : sale.receipt_number || "Sale"}</small></span></td>
-                      <td>{batchNames.get(sale.batch_id) ?? "—"}</td>
-                      <td>{formatNumber(sale.birds_sold)} birds<small className="revenue-cell-secondary">{formatNumber(sale.total_weight_kg, 2)} kg</small></td>
-                      <td>{formatKes(sale.amount_kes)}</td>
-                      <td>{formatKes(sale.paid_kes)}</td>
-                      <td className={sale.outstanding_kes > 0 ? "revenue-due-value" : ""}>{formatKes(sale.outstanding_kes)}</td>
-                      <td><span className={`revenue-status-pill ${sale.payment_status}`}>{sale.payment_status === "partial" ? "Partial" : sale.payment_status}</span>{sale.is_adjustment && <span className="revenue-adjustment-tag">Adjustment</span>}</td>
-                      <td><div className="revenue-row-actions">{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>}{canRecord && !sale.is_adjustment && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="revenue-mobile-ledger">
-              {rows.map((sale) => (
-                <article className={`revenue-mobile-card ${sale.is_adjustment ? "adjustment" : ""}`} key={sale.id}>
-                  <div className="revenue-mobile-card-top">
-                    <div><strong>{sale.customer}</strong><small>{shortDate(sale.sale_date)} · {batchNames.get(sale.batch_id) ?? "Batch"}</small></div>
-                    <span className={`revenue-status-pill ${sale.payment_status}`}>{sale.payment_status === "partial" ? "Partial" : sale.payment_status}</span>
-                  </div>
-                  {sale.is_adjustment && <p className="revenue-adjustment-reason">{sale.remarks}</p>}
-                  <div className="revenue-mobile-values">
-                    <span><small>Sales</small><strong>{formatKes(sale.amount_kes)}</strong></span>
-                    <span><small>Received</small><strong>{formatKes(sale.paid_kes)}</strong></span>
-                    <span><small>Outstanding</small><strong className={sale.outstanding_kes > 0 ? "revenue-due-value" : ""}>{formatKes(sale.outstanding_kes)}</strong></span>
-                  </div>
-                  <div className="revenue-mobile-card-bottom">
-                    <span>{formatNumber(sale.birds_sold)} birds · {formatNumber(sale.total_weight_kg, 2)} kg</span>
-                    {!sale.is_adjustment && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>{canRecord && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div>}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </>
-        ) : (
-          <div className="revenue-empty-state">
-            <span className="revenue-empty-icon"><Icon name="sales" /></span>
-            <strong>{displayError ? "Revenue could not be loaded" : "No sales in this view"}</strong>
-            <p>{displayError ? "Check your connection and try again." : "Try changing the filters or record a sale for a running batch."}</p>
-            {displayError && <button className="revenue-action-link primary" type="button" onClick={() => setRefreshKey((current) => current + 1)}>Try again</button>}
-            {!displayError && canRecord && runningBatches.length > 0 && <button className="button button-primary" type="button" onClick={openSaleDialog}>Record sale</button>}
-          </div>
-        )}
-      </section>
-
-      {saleDialogOpen && (
-        <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSaleDialogOpen(false); }}>
-          <section className="dialog-card revenue-dialog-card" role="dialog" aria-modal="true" aria-labelledby="sale-dialog-title">
-            <div className="dialog-heading">
-              <div><p className="eyebrow">REVENUE</p><h2 id="sale-dialog-title">Record a sale</h2><p className="dialog-description">Record the sale and any amount received today.</p></div>
-              <button className="dialog-close" type="button" aria-label="Close dialog" onClick={() => setSaleDialogOpen(false)}>×</button>
-            </div>
-            <form className="form-stack dialog-form" onSubmit={handleSaleCreate}>
-              <div className="form-grid">
-                <label className="field-span">Running batch<select name="batchId" required defaultValue={runningBatches[0]?.id ?? ""}><option value="" disabled>Select a batch</option>{runningBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.batch_code}{batch.house ? ` · ${batch.house}` : ""}</option>)}</select></label>
-                <label>Sale date<input type="date" required value={saleDate} onChange={(event) => setSaleDate(event.target.value)} /></label>
-                <label>Buyer<input name="customer" required maxLength={128} autoFocus placeholder="Buyer name" /></label>
-                <label>Birds sold<input name="birdsSold" type="number" min="1" step="1" required /></label>
-                <label><span className="revenue-field-label">Total live weight <small>kg</small></span><input name="totalWeightKg" type="number" min="0.001" step="0.001" required /></label>
-                <label>Price basis<select name="priceBasis" defaultValue="Bird"><option value="Bird">Per bird</option><option value="Kg">Per kilogram</option></select></label>
-                <label><span className="revenue-field-label">Price per unit <small>KES</small></span><input name="priceKes" type="number" min="0" step="0.01" required /></label>
-                <label><span className="revenue-field-label">Received now <small>KES · optional</small></span><input name="paidKes" type="number" min="0" step="0.01" defaultValue="0" /></label>
-                <label>Receipt reference<input name="receiptNumber" maxLength={64} placeholder="Optional" /></label>
-                <label className="field-span">Notes<input name="remarks" maxLength={2000} placeholder="Optional sale details" /></label>
-              </div>
-              {saleError && <p className="inline-error" role="alert">{saleError}</p>}
-              <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setSaleDialogOpen(false)}>Cancel</button><button type="submit" className="button button-primary" disabled={saleBusy}>{saleBusy ? "Saving…" : "Save sale"}</button></div>
-            </form>
-          </section>
-        </div>
-      )}
-
-      {paymentSale && (
-        <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPaymentSale(null); }}>
-          <section className="dialog-card revenue-dialog-card payment-dialog-card" role="dialog" aria-modal="true" aria-labelledby="payment-dialog-title">
-            <div className="dialog-heading">
-              <div><p className="eyebrow">PAYMENT HISTORY</p><h2 id="payment-dialog-title">{paymentSale.customer}</h2><p className="dialog-description">{shortDate(paymentSale.sale_date)} · {batchNames.get(paymentSale.batch_id) ?? "Batch"}</p></div>
-              <button className="dialog-close" type="button" aria-label="Close dialog" onClick={() => setPaymentSale(null)}>×</button>
-            </div>
-            <div className="payment-balance-strip">
-              <span><small>Sale</small><strong>{formatKes(paymentSale.amount_kes)}</strong></span>
-              <span><small>Received</small><strong>{formatKes(paymentSale.paid_kes)}</strong></span>
-              <span><small>Due</small><strong>{formatKes(paymentSale.outstanding_kes)}</strong></span>
-            </div>
-            <section className="payment-history-section" aria-label="Recorded payments">
-              <h3>Recorded payments</h3>
-              {paymentLoading ? <p className="empty-inline">Loading payment history…</p> : paymentHistory.length ? (
-                <ul className="payment-history-list">
-                  {paymentHistory.map((payment) => (
-                    <li key={payment.id}><span><strong>{shortDate(payment.payment_date)}</strong><small>{payment.reference || "No reference"}</small></span><strong>{formatKes(Number(payment.amount_kes))}</strong></li>
-                  ))}
-                </ul>
-              ) : <p className="empty-inline">No payment transactions recorded yet.</p>}
-            </section>
-            {paymentError && <p className="inline-error" role="alert">{paymentError}</p>}
-            {canRecord && paymentSale.outstanding_kes > 0 && (
-              <form className="form-stack payment-entry-form" onSubmit={handlePaymentCreate}>
-                <h3>Record a payment</h3>
-                <div className="form-grid">
-                  <label>Payment date<input type="date" required value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label>
-                  <label><span className="revenue-field-label">Amount received <small>KES</small></span><input name="amountKes" type="number" min="0.01" max={paymentSale.outstanding_kes} step="0.01" defaultValue={paymentSale.outstanding_kes} required /></label>
-                  <label className="field-span">Reference<input name="reference" maxLength={64} placeholder="Optional receipt or transaction reference" /></label>
-                </div>
-                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setPaymentSale(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={paymentBusy}>{paymentBusy ? "Saving…" : "Record payment"}</button></div>
-              </form>
-            )}
-          </section>
-        </div>
-      )}
-    </>
-  );
 }

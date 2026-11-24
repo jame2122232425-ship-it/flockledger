@@ -4,9 +4,10 @@ import {
   LandingNavActions,
   LandingSessionProvider,
 } from "@/components/landing-session";
+import LegalPageContent from "@/components/legal-page-content";
 import PricingContent from "@/components/pricing-content";
 
-type MarketingPageKey = "pricing" | "guides" | "faq" | "about" | "contact" | "blog";
+type MarketingPageKey = "pricing" | "guides" | "faq" | "about" | "contact" | "blog" | "privacy" | "terms" | "security";
 
 const pageDetails: Record<MarketingPageKey, { eyebrow: string; title: string; summary: string }> = {
   pricing: {
@@ -39,9 +40,28 @@ const pageDetails: Record<MarketingPageKey, { eyebrow: string; title: string; su
     title: "Notes for running a better-recorded farm",
     summary: "Ideas and practical advice for poultry record keeping, batch performance, and farm operations.",
   },
+  privacy: {
+    eyebrow: "Legal · Draft",
+    title: "Privacy Policy",
+    summary: "How FlockLedger handles account and farm information. Draft for review.",
+  },
+  terms: {
+    eyebrow: "Legal · Draft",
+    title: "Terms of Service",
+    summary: "Draft terms for using FlockLedger farm workspaces and services.",
+  },
+  security: {
+    eyebrow: "Trust · Draft",
+    title: "Data Security",
+    summary: "An overview of access controls and security practices in FlockLedger. Draft for review.",
+  },
 };
 
 function PageBody({ page }: { page: MarketingPageKey }) {
+  if (page === "privacy" || page === "terms" || page === "security") {
+    return <LegalPageContent page={page} />;
+  }
+
   if (page === "guides") {
     return (
       <>
@@ -205,7 +225,7 @@ function MarketingFooter() {
         </div>
         <div><strong>Product</strong><Link href="/#features">Features</Link><Link href="/pricing">Pricing</Link><Link href="/guides">Guides</Link></div>
         <div><strong>Company</strong><Link href="/about">About Us</Link><Link href="/contact">Contact</Link><Link href="/blog">Blog</Link></div>
-        <div><strong>Legal</strong><Link href="/#privacy">Privacy Policy</Link><Link href="/#terms">Terms of Service</Link><Link href="/#security">Data Security</Link></div>
+        <div><strong>Legal</strong><Link href="/privacy">Privacy Policy</Link><Link href="/terms">Terms of Service</Link><Link href="/security">Data Security</Link></div>
         <div><strong>Contact</strong><a href="mailto:support@flockledger.co.ke">Support email</a><Link href="/contact">Contact us</Link></div>
       </div>
       <div className="landing-container landing-footer-bottom">© 2026 FlockLedger. All rights reserved.</div>

@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  paginationMetadata,
+  paginationRange,
+  parsePagination,
+} from "@/lib/api/pagination";
 
 const createSchema = z.object({
   farmId: z.string().uuid(),
@@ -32,6 +37,8 @@ const fields =
   "id, farm_id, batch_id, record_date, record_type, disease_reason, product_name, product_details, vaccine_batch_number, product_expiry_date, dose_route, birds_affected, duration_days, withdrawal_days, cost_kes, given_by, reaction, post_mortem_findings, suspected_cause, action_taken, veterinarian_consulted, remarks, created_at";
 
 export async function GET(request: NextRequest) {
+  const pagination = parsePagination(request.nextUrl.searchParams);
+  if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
   const query = z.object({ farmId: z.string().uuid(), batchId: z.string().uuid().optional() })
     .safeParse({
       farmId: request.nextUrl.searchParams.get("farmId"),
@@ -43,10 +50,13 @@ export async function GET(request: NextRequest) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    let request = supabase.from("health_records").select(fields).eq("farm_id", query.data.farmId)
-      .order("record_date", { ascending: false });
+    let request = supabase.from("health_records").select(fields, { count: "exact" })
+      .eq("farm_id", query.data.farmId)
+      .order("record_date", { ascending: false })
+      .order("id", { ascending: false });
     if (query.data.batchId) request = request.eq("batch_id", query.data.batchId);
-    const { data, error } = await request;
+    const { from, to } = paginationRange(pagination);
+    const { data, error, count } = await request.range(from, to);
     if (error) {
       console.error("Failed to load health records:", error.code);
       return apiError("Could not load health records.", 500);
@@ -61,6 +71,7 @@ export async function GET(request: NextRequest) {
           return date.toISOString().slice(0, 10);
         })(),
       })),
+      pagination: paginationMetadata(count ?? 0, pagination),
     });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) return apiError(error.message, 503);

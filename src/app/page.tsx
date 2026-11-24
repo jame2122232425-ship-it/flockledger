@@ -206,7 +206,7 @@ export default function Home() {
           </div>
           <div><strong>Product</strong><a href="#features">Features</a><Link href="/pricing">Pricing</Link><Link href="/guides">Guides</Link></div>
           <div><strong>Company</strong><Link href="/about">About Us</Link><Link href="/contact">Contact</Link><Link href="/blog">Blog</Link></div>
-          <div><strong>Legal</strong><Link href="/#privacy">Privacy Policy</Link><Link href="/#terms">Terms of Service</Link><Link href="/#security">Data Security</Link></div>
+          <div><strong>Legal</strong><Link href="/privacy">Privacy Policy</Link><Link href="/terms">Terms of Service</Link><Link href="/security">Data Security</Link></div>
           <div><strong>Contact</strong><a href="mailto:support@flockledger.co.ke">Support email</a><Link href="/contact">Contact us</Link></div>
         </div>
         <div className="landing-container landing-footer-bottom">© 2026 FlockLedger. All rights reserved.</div>
