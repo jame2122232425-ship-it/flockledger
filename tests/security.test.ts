@@ -22,6 +22,10 @@ describe("security helpers", () => {
 
   it("only protects authenticated application API paths", () => {
     expect(isProtectedApiPath("/api/batches")).toBe(true);
+    expect(isProtectedApiPath("/api/subscription-plans")).toBe(false);
+    expect(isProtectedApiPath("/api/subscription-plans/unexpected")).toBe(true);
+    expect(isProtectedApiPath("/api/farms/farm-id/subscription")).toBe(true);
+    expect(isProtectedApiPath("/api/farms/farm-id/subscription/usage")).toBe(true);
     expect(isProtectedApiPath("/api/auth/sign-in")).toBe(false);
     expect(isProtectedApiPath("/api/staff/setup/password")).toBe(false);
   });

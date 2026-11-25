@@ -31,6 +31,10 @@ const RevenuePage = dynamic(
   () => import("@/components/revenue-page").then((module) => module.RevenuePage),
   { loading: () => <div className="empty-inline">Loading revenue ledger…</div> },
 );
+const FarmSubscriptionPage = dynamic(
+  () => import("@/components/farm-subscription-page"),
+  { loading: () => <div className="empty-inline">Loading farm billing…</div> },
+);
 
 type Farm = {
   id: string;
@@ -41,7 +45,7 @@ type Farm = {
   role: string;
 };
 
-type Tab = "overview" | "batches" | "daily" | "revenue";
+type Tab = "overview" | "batches" | "daily" | "revenue" | "billing";
 const TAB_CHANGE_EVENT = "flockledger-tab-change";
 const ACTIVE_FARM_STORAGE_KEY = "flockledger:active-farm-id";
 
@@ -56,7 +60,9 @@ function subscribeToTabChanges(onChange: () => void) {
 
 function getTabFromLocation(): Tab {
   const tab = new URLSearchParams(window.location.search).get("tab");
-  return tab === "batches" || tab === "daily" || tab === "revenue" ? tab : "overview";
+  return tab === "batches" || tab === "daily" || tab === "revenue" || tab === "billing"
+    ? tab
+    : "overview";
 }
 
 function getServerTabSnapshot(): Tab {
@@ -856,7 +862,9 @@ export default function FlockLedgerApp({
       ? "Flock batches"
       : tab === "daily"
         ? "Daily records"
-        : "Revenue";
+        : tab === "revenue"
+          ? "Revenue"
+          : "Billing";
 
   return (
     <main className="app-shell">
@@ -883,6 +891,7 @@ export default function FlockLedgerApp({
             ["batches", "Flock batches", "batch"],
             ["daily", "Daily records", "daily"],
             ["revenue", "Revenue", "sales"],
+            ["billing", "Billing", "billing"],
           ] as const).map(([id, label, icon]) => (
             <button className={`nav-link ${tab === id ? "active" : ""}`} type="button" key={id} onClick={() => navigateToTab(id)}>
               <span className="nav-icon"><Icon name={icon} /></span>{label}
@@ -933,7 +942,7 @@ export default function FlockLedgerApp({
           <div className="breadcrumb"><span>Workspace</span><span className="crumb-separator">/</span><strong>{selectedTabTitle}</strong></div>
           <div className="topbar-actions">
             <span className="date-chip"><span className="status-dot" />{shortDate(todayInNairobi())}</span>
-            {tab !== "revenue" && (
+            {tab !== "revenue" && tab !== "billing" && (
               <button className="button button-primary topbar-add" type="button" disabled={!activeFarm} onClick={() => openDialog(tab === "daily" ? "daily" : "batch")}>
                 {tab === "daily" ? "Add daily record" : "New batch"}
               </button>
@@ -976,13 +985,20 @@ export default function FlockLedgerApp({
             <BatchesPage farmId={farmId} initialDashboard={dashboard} loading={loadingDashboard} onAdd={() => openDialog("batch")} />
           ) : tab === "daily" ? (
             <DailyPage farmId={farmId} batchNames={batchNames} refreshVersion={dailyRefreshVersion} onAdd={() => openDialog("daily")} />
-          ) : (
+          ) : tab === "revenue" ? (
             <RevenuePage
               farmId={activeFarm.id}
               batches={farmBatches}
               loadingBatches={loadingDashboard}
               canRecord={activeFarm.role === "owner" || activeFarm.role === "manager" || activeFarm.role === "accountant"}
               onFeedback={setFeedback}
+            />
+          ) : (
+            <FarmSubscriptionPage
+              key={activeFarm.id}
+              farmId={activeFarm.id}
+              farmName={activeFarm.name}
+              farmRole={activeFarm.role}
             />
           )}
         </div>

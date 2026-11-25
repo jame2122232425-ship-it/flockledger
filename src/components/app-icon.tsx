@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type IconName = "overview" | "batch" | "daily" | "bird" | "feed" | "cash" | "sales";
+export type IconName = "overview" | "batch" | "daily" | "bird" | "feed" | "cash" | "sales" | "billing";
 
 export function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, ReactNode> = {
@@ -11,6 +11,7 @@ export function Icon({ name }: { name: IconName }) {
     feed: <><path d="M4 7h16l-1.5 13h-13zM7 7l1-4h8l1 4M8 11h8" /></>,
     cash: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 9h.01M17 15h.01M12 9v6M10 11h3.5a1.5 1.5 0 0 1 0 3H10" /></>,
     sales: <><path d="M4 19V5M4 19h17M8 15l4-4 3 2 5-6" /><path d="M16 7h4v4" /></>,
+    billing: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M7 15h3" /></>,
   };
 
   return (

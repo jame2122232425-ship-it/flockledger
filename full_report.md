@@ -758,6 +758,39 @@ The codebase has strong database and financial design foundations, and all execu
 - `public.has_farm_role`
 - `public.accept_farm_invitations`
 - `public.create_sale`
+
+## 24. Subscription Foundation S1 Implementation Update
+
+### Scope and status
+
+The repository now contains the S1 database and service foundation for farm-scoped plans, trials and entitlements. This phase intentionally does not add checkout UI, a payment provider, client-controlled payment confirmation, or production deployment. The migration was applied transactionally to the user's confirmed isolated test database on 24 November 2026; it was **not** applied to production.
+
+### Implemented
+
+- Added `supabase/migrations/202611240001_subscription_foundation.sql` with Starter, Professional and Enterprise plans; configurable feature flags/levels and limits; monthly/annual KES price records; farm subscription lifecycle; payment, invoice, append-only event, webhook-deduplication and usage tables.
+- New farms receive an active Starter subscription; existing farms are backfilled where no current subscription exists. Paid plan prices remain `NULL` pending business approval.
+- Added owner-authorized, one-time, no-card Professional trial start using the configured 14-day plan value; trial expiry returns the farm to Starter without deleting the farm or membership.
+- Added owner-scheduled cancellation at the end of the current trial or billing period. Entitlements remain available until that end. `past_due` resolves to Starter immediately; `grace_period` retains its plan through `current_period_end`; overdue past-due/grace states fall back to Starter when entitlements are next read.
+- Subscription lifecycle transitions require `service_role`; paid activation additionally requires a successful payment row. Payment references and provider webhook IDs are unique. No payment-provider integration writes those rows in this phase.
+- Added RLS and grants for plan-catalog reads and owner-only subscription/payment/invoice/history reads. Entitlement reads require farm membership, so staff inherit their farm's plan without gaining billing-management privileges.
+- Subscription event history is append-only. Foreign keys deliberately prevent farm/subscription deletion while related history exists; no farm deletion workflow is available.
+- Added `src/lib/subscriptions/service.ts` for typed database-backed plan/entitlement reads, trial/cancellation/usage RPC calls, feature helpers and limit evaluation. Missing limits fail closed; an explicitly configured `NULL` limit is treated as unbounded. Limit evaluation is advisory only: existing resource-create routes are not yet atomically quota-gated, so resource limits are not an enforcement boundary.
+- Added the plan catalog, entitlement, trial, and cancellation routes. At the S1 stage the catalog route was authenticated; Phase S2 below makes only `GET /api/subscription-plans` public while farm-scoped operations remain authenticated.
+- Added `tests/subscriptions.test.ts` for response-shape validation, features, configured/uncapped/missing limits and invalid/overflow usage. Added `tests/subscription-foundation.sql` for seeded plans, farm isolation, owner/staff permissions, trial lifecycle, cancellation, fallback, payment proof, duplicate references/webhooks, append-only events and retained farm history. The SQL test wraps all fixtures in a transaction and rolls back.
+
+### Validation and limitations
+
+- `npm test`: passed; 9 test files and 33 tests.
+- `npm run lint`: passed.
+- `npx tsc --noEmit`: passed. Explicit errors are raised if Supabase returns null query data without an error.
+- A post-S1 production build was not run because the local Next.js development server was already running and a build could disturb its `.next` output.
+- `tests/subscription-foundation.sql`: passed against the confirmed isolated test database; its fixture users/farms were rolled back. The test exercised owner/staff authorization, cross-farm denial, trial/cancellation/expiry, payment proof, duplicate references/webhooks and event retention.
+- Post-apply verification confirmed the three seeded plans and lifecycle RPCs exist, with no fixture users left behind.
+- The target database had no `supabase_migrations.schema_migrations` table. The migration was therefore applied directly with `psql` in one transaction and no migration-history record was created. Reconcile the full baseline before using `supabase db push` against this database; do not mark prior migrations applied without verifying them.
+- No production migration or deployment was performed. The SQL integration script must only be run with an explicitly configured isolated test database and must not use production credentials.
+- There is no down migration. Although the migration is additive, rollback after real subscription activity would require preserving/exporting audit and payment records and using a reviewed forward repair or database restore; dropping the new tables would destroy history and is not an acceptable production rollback.
+- The migration backfills a Starter record for existing farms. Review row counts, data retention and the farm-delete restriction in a staging copy before deployment.
+- At the S1 report cutoff, the pricing component was still static; Phase S2 below replaces it with the database-backed pricing UI.
 - `public.validate_sale_payment`
 - `public.create_sale_payment_cash_entry`
 - `public.validate_correction`
@@ -1085,3 +1118,97 @@ This completes the Phase 3 implementation tranche, but it is not a production lo
 - Offset-based pages can become expensive at deep page numbers. Revenue uses a cursor, but other lists remain offset-paginated.
 - No production-sized dataset, concurrent request test, or production workload benchmark was run. Index presence and the synthetic 10,000-row result do not establish production performance.
 - The feature views are code-split for on-demand loading, but bundle-size impact was not measured, and the main app shell is still a large component.
+
+# Development CSP Compatibility
+
+- Updated `next.config.ts` so `script-src` includes `'unsafe-eval'` only when `NODE_ENV` is `development`, as required by React’s development diagnostics. The production CSP remains without this directive.
+- Verified the running local development server returns HTTP 200 and a Content-Security-Policy header containing `'unsafe-eval'`.
+- `npm run lint`, `npx tsc --noEmit`, and `git diff --check` passed for this update.
+
+# Phase 4 Production Readiness Progress
+
+## Completed locally
+
+- Added `.github/workflows/ci.yml` to run type-checking, lint, unit tests, and a production build on pushes and pull requests. The workflow uses nonfunctional placeholder environment values and has no deployment or database migration step.
+- Added `docs/deployment.md` with a provider-neutral checklist for production secrets, Supabase Auth/email, CSP, migration review, backups/restore, edge abuse limits, monitoring, and legal launch review. Linked it from `README.md`.
+- Replaced credential-like values discovered in the local `.env.example` with placeholders. It was ignored and not tracked before this change; `.gitignore` now explicitly allows only this sanitized template to be tracked. `.env.local` remains ignored and was not read or modified.
+
+## Credential and external configuration status
+
+- The local ignored `.env.example` contained credential-shaped values. A Git history search found no matching recorded secret pattern, but that does not establish whether the values are valid or were shared elsewhere. If they correspond to active Supabase credentials, rotate/revoke them and update only protected environments. This repository change does not rotate credentials. Do not assume the values were harmless placeholders.
+- The user confirmed those values had been active and have already been rotated. The ignored template was sanitized; no matching recorded secret pattern was found in the repository history. No credential values were requested or recorded.
+- The user selected Vercel, a separate production Supabase project, and Supabase's default Auth email delivery. Edge protection and monitoring provider choices are deferred, and the production backup/PITR plan is unknown. No production environment, project setting, email configuration, WAF, monitoring destination, backup plan, or deployment identity was configured or changed.
+
+## Remaining before production
+
+- Connect and configure the Vercel project, map protected production variables, and ensure preview deployments use only a separate non-production Supabase project.
+- Verify the separate production Supabase project is the one configured in Vercel and that only replacement credentials are active there.
+- Configure and test production Auth/default-email redirects, cookie/session behavior, and response headers.
+- Select and configure edge rate limits/WAF and alerting/error-reporting destinations; these provider choices are deferred.
+- Confirm backup/PITR plan and retention, perform an isolated restore drill, and approve migration deployment/forward-recovery steps.
+- Obtain review and approval of draft legal/privacy copy.
+- The new CI workflow has not yet run on GitHub. At this Phase 4 report cutoff, local lint, type-checking, and unit tests passed; the build had not been rerun because a development server was active. The Phase S2 update below records the later isolated-copy production build.
+
+## 25. Subscription Frontend S2 Implementation Update
+
+### Implemented
+
+- Replaced the static pricing copy with database-backed Starter, Professional, and Enterprise cards, plan features/limits, KES-only monthly/annual display, and an unavailable-price state for unset paid prices. Trial and Enterprise links route to the farm billing interface and contact page; no checkout or purchase action is exposed.
+- Added the farm Billing tab and dashboard for current subscription status, plan, billing interval, trial/period dates, cancellation state, entitlements, usage, and plan options. The page reloads when the selected farm changes and validates returned farm IDs.
+- Added Professional trial availability, trial progress/expiry, refresh after activation, used/expired trial state, and owner-only cancellation with confirmation and effective date. Staff receive read-only billing details.
+- Added the authenticated `GET /api/farms/:farmId/subscription/usage` route backed by the existing S1 usage RPC. Farm membership remains enforced by the existing authenticated database path.
+- Made `GET /api/subscription-plans` public so the unauthenticated Pricing page can display the catalog. The endpoint returns only active catalog data and uses the server-only admin client. Updated proxy path protection to exempt this exact path; farm subscription and usage paths remain protected. The route waits for a request using Next.js `connection()` so the database query is not attempted during prerendering.
+- Added reusable subscription display/interval components, responsive styling, and component tests. README now documents the public catalog, authenticated usage route, KES-only pricing, and limitations.
+- Fixed the empty-catalog dashboard state so missing plan configuration is not presented as “already on the highest plan.”
+
+### Files
+
+- Added: `src/components/farm-subscription-page.tsx`, `src/components/subscription-ui.tsx`, `src/app/api/subscription-plans/route.ts`, `src/app/api/farms/[farmId]/subscription/usage/route.ts`, `tests/subscription-ui.test.tsx`, and `vitest.config.mts`.
+- Updated: `src/components/pricing-content.tsx`, `src/components/flockledger-app.tsx`, `src/components/app-icon.tsx`, `src/components/marketing-pages.tsx`, `src/app/globals.css`, `src/lib/proxy-security.ts`, `tests/security.test.ts`, `package.json`, `package-lock.json`, `README.md`, and this report.
+- S2 hardening additionally updated `src/lib/subscriptions/service.ts`, `src/components/farm-subscription-page.tsx`, `src/components/subscription-ui.tsx`, `tests/subscriptions.test.ts`, `tests/subscription-ui.test.tsx`, `tests/security.test.ts`, and `tests/subscription-foundation.sql`; added `supabase/migrations/202611240002_subscription_trial_history.sql`; and updated `README.md` and this report.
+
+### Integrated endpoints
+
+- `GET /api/subscription-plans` — public active-plan catalog; KES prices are returned as configured, including `null` for unset paid prices.
+- `GET /api/farms/:farmId/subscription` — authenticated farm entitlements.
+- `GET /api/farms/:farmId/subscription/usage` — authenticated farm usage, with database membership authorization.
+- `POST /api/farms/:farmId/subscription` — existing owner-authorized one-time Professional trial.
+- `POST /api/farms/:farmId/subscription/cancel` — existing owner-authorized scheduled cancellation.
+
+### Validation and limitations
+
+- `npm test`: passed, 10 files and 47 tests, including pricing rendering, KES monthly/annual price selection, missing prices, catalog and action errors, trial activation/history, cancellation effective dates, farm switching, role visibility, loading/empty states, and public/protected proxy-path behavior.
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- The running local dev server returned the active test-database plan catalog without authentication after the proxy exception was added. The Pricing page rendered all three plans at a 390px mobile viewport; paid prices appeared unavailable and the currency note remained KES.
+- `npm run build`: passed in an isolated copy of the final worktree with CI placeholder environment values. The build compiled successfully, completed TypeScript, and generated all 45 static/dynamic routes. The active development server's `.next` directory was not used.
+- No production database, account setting, or deployment was changed. No payment provider, checkout, or payment collection is implemented. Paid plan prices remain unset.
+- Usage limits remain informational and are not atomically enforced across all resource-creation operations. Production billing is not enabled.
+
+## 26. S2 Verification and Final Hardening
+
+### Public catalog and farm authorization
+
+- The public `GET /api/subscription-plans` path remains the only subscription API exception in the proxy allowlist. It returns only active plans and a strict display projection: plan code/name/description/trial duration, feature enabled/limit/configurable fields, and KES prices. Database IDs and raw feature configuration are not serialized.
+- The catalog route uses the server-only admin client and does not query farm subscriptions. Farm entitlements, usage, trial history, and lifecycle actions remain behind authenticated routes and membership/owner checks in the database.
+- Added projection and proxy-boundary tests. The SQL integration test covers authenticated member access, staff read-only access, nonmember denial, and anonymous denial for trial history.
+
+### Historical Professional trial expiry
+
+- Added `supabase/migrations/202611240002_subscription_trial_history.sql`, an additive RPC exposing only the latest Professional trial start/end timestamps to authenticated farm members. It reads the existing `farm_subscriptions.trial_started_at` and `trial_ends_at`; it adds no table/column and does not alter trial lifecycle behavior.
+- Updated the entitlement response and Billing UI to show the retained historical expiry date after the farm falls back to Starter. Expired and previously used trials remain ineligible for restart.
+- The rollback-only SQL integration test covers active/expired history, owner/staff access, anonymous/nonmember denial, no reactivation, and retained subscription history.
+- The additive migration was applied transactionally to the previously confirmed isolated test database. `tests/subscription-foundation.sql` then passed, including the new history/access cases; all fixtures were rolled back. Production was not modified.
+- The focused security review found no vulnerabilities in the public catalog/access-boundary scope.
+
+### Quota enforcement assessment
+
+- `POST /api/batches` in `src/app/api/batches/route.ts` directly inserts a batch after authentication and relies on role/RLS. It does not read subscription limits or reserve quota in a transaction.
+- `POST /api/farms/[farmId]/invitations` in `src/app/api/farms/[farmId]/invitations/route.ts` creates an Auth user, membership, and invitation with separate administrative calls. It does not check the staff limit or atomically reserve a seat. Concurrent requests can exceed displayed limits, and partial provisioning spans multiple writes.
+- `evaluateSubscriptionLimit()` is not called by either operation. The Billing UI explicitly labels usage as informational; displayed limits are not enforcement.
+- Separate backend plan (not implemented in S2): move batch creation into an authenticated database RPC that locks/serializes per farm, counts active batches, checks the current entitlement and inserts atomically. For staff provisioning, add an owner-authorized atomic seat-reservation operation with a farm-scoped lock and idempotent reservation state; coordinate Auth user creation with explicit compensation/reconciliation for failures. Add concurrent SQL integration tests proving the configured caps cannot be exceeded.
+
+### Remaining billing restrictions
+
+- Professional and Enterprise prices are still unset. There is no checkout, payment collection, payment-provider integration, or production billing.
+- Batch and additional-staff limits are informational until the separate atomic backend work above is completed.

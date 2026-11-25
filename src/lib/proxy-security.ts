@@ -31,5 +31,6 @@ export function isProtectedApiPath(pathname: string) {
       "/api/auth/session",
       "/api/staff/setup/verify",
       "/api/staff/setup/password",
+      "/api/subscription-plans",
     ].includes(pathname);
 }

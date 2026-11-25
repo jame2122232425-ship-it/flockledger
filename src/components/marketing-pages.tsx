@@ -12,8 +12,8 @@ type MarketingPageKey = "pricing" | "guides" | "faq" | "about" | "contact" | "bl
 const pageDetails: Record<MarketingPageKey, { eyebrow: string; title: string; summary: string }> = {
   pricing: {
     eyebrow: "Simple, transparent pricing",
-    title: "Simple pricing for profitable poultry farming.",
-    summary: "Start for free. Upgrade when you're ready to track financials, manage staff roles, and unlock your batch performance reports. No hidden fees.",
+    title: "Subscription options for your poultry farm.",
+    summary: "Compare plans and farm entitlements. Eligible Starter farms can request a no-payment Professional trial; paid pricing and online checkout are not yet available.",
   },
   guides: {
     eyebrow: "FlockLedger guides",
