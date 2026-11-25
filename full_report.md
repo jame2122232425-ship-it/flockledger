@@ -1212,3 +1212,11 @@ This completes the Phase 3 implementation tranche, but it is not a production lo
 
 - Professional and Enterprise prices are still unset. There is no checkout, payment collection, payment-provider integration, or production billing.
 - Batch and additional-staff limits are informational until the separate atomic backend work above is completed.
+
+## 27. Fresh Test Project Migration Deployment
+
+- On 25 Nov 2026, inspected the configured Supabase target before applying schema changes. It had zero `public` tables, zero Auth users, no farm/profile tables, and no migration-history table. The database was writable and matched the user's description of a newly connected test project.
+- Applied all 13 SQL migration files from `supabase/migrations` in filename order. Each migration and its `supabase_migrations.schema_migrations` version record were committed together in a transaction. No existing application data was present to alter.
+- Post-apply checks confirmed 13 migration records, 35 public tables with RLS enabled, three seeded subscription plans, and the expected farm/subscription RPCs. Auth users, farms, and memberships remained at zero.
+- The rollback-only `tests/subscription-foundation.sql` integration suite passed against this project. A synthetic Auth-user/profile-trigger probe also passed inside a rolled-back transaction. No test user or farm was retained.
+- This operation targeted the newly configured test project only. No production database was accessed or changed. The previous isolated project’s untracked migration-history caveat still applies to that separate project.

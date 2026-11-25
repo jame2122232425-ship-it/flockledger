@@ -96,6 +96,7 @@ Batch IDs are generated and read-only when creating a batch. The label uses the 
 - `evaluateSubscriptionLimit` is a backend helper only. Existing resource-creation routes are not yet atomically quota-gated, so plan limits must not be treated as enforced until those writes use a database reservation/atomic check.
 - Subscription event history is append-only and retained: foreign keys intentionally prevent deleting a farm/subscription while related audit events remain. No farm-delete workflow exists.
 - The S1 migration was applied transactionally to the confirmed isolated test database on 24 Nov 2026; it was not applied to production. Its rollback-only SQL integration test passed there. That database has no `supabase_migrations.schema_migrations` history table, so its earlier migration state is not tracked by the Supabase CLI. Reconcile the baseline before using `supabase db push` against that database.
+- On 25 Nov 2026, all 13 migrations in `supabase/migrations` were applied in filename order to a newly configured, verified-empty test Supabase project. Migration versions were recorded in `supabase_migrations.schema_migrations`; the rollback-only subscription integration suite passed, and no fixture users/farms were retained. This did not modify production.
 - Run `psql $env:DATABASE_URL --set ON_ERROR_STOP=1 --file "tests\subscription-foundation.sql"` only against an isolated test database after applying the migrations. The script runs in a transaction and rolls back its fixture users and farms.
 
 ### Subscription frontend S2 (implemented; no checkout)

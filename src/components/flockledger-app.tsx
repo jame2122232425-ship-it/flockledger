@@ -879,7 +879,7 @@ export default function FlockLedgerApp({
             <FarmPicker farms={farms} selectedFarmId={farmId} onSelect={handleFarmSelection} onAddFarm={() => openDialog("farm")} />
           ) : (
             <button className="farm-picker add-farm-picker" type="button" onClick={() => openDialog("farm")}>
-              <span>Create your farm</span>
+              <span>Register new farm</span>
             </button>
           )}
           {farms.length > 0 && <span className="farm-role">{activeFarm?.role} account</span>}
@@ -964,7 +964,7 @@ export default function FlockLedgerApp({
               <p className="eyebrow">A good place to begin</p>
               <h1>Set up your farm workspace</h1>
               <p>Add your farm details to start recording batches, daily activity, and performance.</p>
-              <button className="button button-primary" type="button" onClick={() => openDialog("farm")}>Create your farm</button>
+              <button className="button button-primary" type="button" onClick={() => openDialog("farm")}>Register new farm</button>
               {farmError && <p className="inline-error" role="alert">{farmError}</p>}
             </section>
           ) : !activeFarm ? (
