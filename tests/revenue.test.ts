@@ -140,21 +140,24 @@ describe("revenue totals", () => {
       is_adjustment: true,
       sale_date: "2026-03-11",
       amount_kes: 300,
-      paid_kes: 100,
-      payment_status: "partial",
+      paid_kes: 0,
+      unreconciled_paid_kes: 100,
+      payment_status: "unpaid",
     });
     expect(rows[1]).toMatchObject({
       is_adjustment: false,
       amount_kes: 1350,
-      paid_kes: 300,
-      outstanding_kes: 1050,
+      paid_kes: 250,
+      unreconciled_paid_kes: 50,
+      outstanding_kes: 1100,
       payment_status: "partial",
     });
-    expect(filterRevenueSales(rows, "unpaid")).toEqual([]);
+    expect(filterRevenueSales(rows, "unpaid")).toEqual([rows[0]]);
     expect(summarizeRevenueSales(rows)).toEqual({
       sales_kes: 1650,
-      received_kes: 400,
-      outstanding_kes: 1250,
+      received_kes: 250,
+      outstanding_kes: 1400,
+      unreconciled_paid_kes: 150,
       sale_count: 2,
     });
   });
@@ -173,6 +176,7 @@ describe("revenue receipt PDFs", () => {
     price_kes: 100,
     amount_kes: 1250,
     paid_kes: 250,
+    unreconciled_paid_kes: 0,
     outstanding_kes: 1000,
     payment_status: "partial",
     receipt_number: "SALE-001",

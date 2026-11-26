@@ -8,6 +8,7 @@ import { generateBatchCode, generateBatchCodeSuffix } from "@/lib/batches/batch-
 import { dailyRecordCreateSchema } from "@/lib/validation/daily-records";
 import { Icon } from "@/components/app-icon";
 import { Metric } from "@/components/metric-card";
+import { BottomTabs, MobileAccountMenu, type AppTab } from "@/components/mobile-navigation";
 import { RequestError, request } from "@/lib/client/request";
 import { formatKes, formatNumber, shortDate, todayInNairobi } from "@/lib/format";
 import type { PageMetadata } from "@/lib/api/pagination";
@@ -31,6 +32,14 @@ const RevenuePage = dynamic(
   () => import("@/components/revenue-page").then((module) => module.RevenuePage),
   { loading: () => <div className="empty-inline">Loading revenue ledger…</div> },
 );
+const AuditPage = dynamic(
+  () => import("@/components/audit-page").then((module) => module.AuditPage),
+  { loading: () => <div className="empty-inline">Loading audit history…</div> },
+);
+const PlatformAdminPage = dynamic(
+  () => import("@/components/platform-admin-page").then((module) => module.PlatformAdminPage),
+  { loading: () => <div className="empty-inline">Loading platform controls…</div> },
+);
 const FarmSubscriptionPage = dynamic(
   () => import("@/components/farm-subscription-page"),
   { loading: () => <div className="empty-inline">Loading farm billing…</div> },
@@ -41,11 +50,22 @@ type Farm = {
   name: string;
   currency: string;
   timezone: string;
-  opening_cash_balance_kes: number;
+  lifecycle_status: "active" | "suspended" | "pending_setup" | "pending_approval" | "rejected" | "archived";
   role: string;
 };
 
-type Tab = "overview" | "batches" | "daily" | "revenue" | "billing";
+type FarmApplication = {
+  id: string;
+  farm_id: string;
+  status: string;
+  farm_name: string;
+  decision_reason: string | null;
+  created_at: string;
+  submitted_at: string | null;
+  decided_at: string | null;
+};
+
+type Tab = AppTab;
 const TAB_CHANGE_EVENT = "flockledger-tab-change";
 const ACTIVE_FARM_STORAGE_KEY = "flockledger:active-farm-id";
 
@@ -60,7 +80,8 @@ function subscribeToTabChanges(onChange: () => void) {
 
 function getTabFromLocation(): Tab {
   const tab = new URLSearchParams(window.location.search).get("tab");
-  return tab === "batches" || tab === "daily" || tab === "revenue" || tab === "billing"
+  return tab === "batches" || tab === "daily" || tab === "revenue" || tab === "audit"
+    || tab === "platform" || tab === "billing"
     ? tab
     : "overview";
 }
@@ -100,7 +121,7 @@ function normalizeFarm(row: unknown): Farm | null {
   const entry = row as {
     farm_id?: string;
     role?: string;
-    farms?: Farm | Farm[] | null;
+    farms?: Omit<Farm, "role"> | Array<Omit<Farm, "role">> | null;
   };
   const farm = Array.isArray(entry.farms) ? entry.farms[0] : entry.farms;
   if (!farm?.id || !entry.role) return null;
@@ -179,7 +200,7 @@ function FarmPicker({
               <span className="farm-dropdown-avatar">{farm.name.slice(0, 1).toUpperCase()}</span>
               <span className="farm-dropdown-copy">
                 <strong>{farm.name}</strong>
-                <small>{farm.role} account</small>
+                <small>{farm.role} · {farm.lifecycle_status.replaceAll("_", " ")}</small>
               </span>
               {farm.id === selectedFarmId && <span className="farm-dropdown-check" aria-hidden="true">✓</span>}
             </button>
@@ -208,11 +229,13 @@ export default function FlockLedgerApp({
 }) {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">(initialAuthMode);
   const [authError, setAuthError] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [farms, setFarms] = useState<Farm[]>([]);
+  const [farmApplications, setFarmApplications] = useState<FarmApplication[]>([]);
   const [farmBatches, setFarmBatches] = useState<FarmBatch[]>([]);
   const [farmId, setFarmId] = useState("");
   const [farmError, setFarmError] = useState("");
@@ -242,12 +265,14 @@ export default function FlockLedgerApp({
   );
   const [dialog, setDialog] = useState<"batch" | "daily" | "farm" | "team" | null>(null);
   const [dialogError, setDialogError] = useState("");
+  const farmApplicationIdempotencyKey = useRef<string | null>(null);
   const [dailyBatchId, setDailyBatchId] = useState("");
   const [dailyRecordDate, setDailyRecordDate] = useState("");
   const [feedback, setFeedback] = useState("");
   const [pageError, setPageError] = useState("");
   const [loadingDashboard, setLoadingDashboard] = useState(true);
   const dashboardRequestId = useRef(0);
+  const dialogCardRef = useRef<HTMLElement>(null);
 
 
   useEffect(() => {
@@ -261,6 +286,23 @@ export default function FlockLedgerApp({
     const timer = window.setTimeout(() => setPageError(""), 5000);
     return () => window.clearTimeout(timer);
   }, [pageError]);
+
+  useEffect(() => {
+    if (authenticated !== true) return;
+    let active = true;
+    request<{ isPlatformAdmin: boolean }>("/api/platform/session")
+      .then((result) => {
+        if (active) setIsPlatformAdmin(result.isPlatformAdmin);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setIsPlatformAdmin(false);
+        setPageError(error instanceof Error ? error.message : "Could not load platform access.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [authenticated]);
 
   useEffect(() => {
     if (!authNotice) return;
@@ -279,6 +321,46 @@ export default function FlockLedgerApp({
     const timer = window.setTimeout(() => setDialogError(""), 5000);
     return () => window.clearTimeout(timer);
   }, [dialogError]);
+
+  useEffect(() => {
+    if (!dialog) return;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const frame = window.requestAnimationFrame(() => dialogCardRef.current?.focus());
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDialog(null);
+        return;
+      }
+      if (event.key !== "Tab" || !dialogCardRef.current) return;
+      const focusable = Array.from(
+        dialogCardRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.offsetParent !== null || element === document.activeElement);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogCardRef.current)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus();
+    };
+  }, [dialog]);
 
   useEffect(() => {
     if (!farmError) return;
@@ -302,7 +384,9 @@ export default function FlockLedgerApp({
     && dailyRecordLookup?.key !== dailyRecordLookupKey;
   const dailyRecordLookupFailed = dailyRecordLookup?.key === dailyRecordLookupKey
     && Boolean(dailyRecordLookup.error);
-  const canEditRecords = activeFarm?.role === "owner" || activeFarm?.role === "manager";
+  const farmIsActive = activeFarm?.lifecycle_status === "active";
+  const canViewAudit = ["owner", "manager", "accountant", "inventory_officer"].includes(activeFarm?.role ?? "");
+  const canEditRecords = farmIsActive && (activeFarm?.role === "owner" || activeFarm?.role === "manager");
   const canCreateBatches = canEditRecords;
   const batchNames = useMemo(() => new Map([
     ...batches.map((batch) => [batch.batch_id, batch.batch_code] as const),
@@ -383,10 +467,14 @@ export default function FlockLedgerApp({
   const loadFarms = useCallback(async (preferredFarmId?: string) => {
     setLoadingDashboard(true);
     await request<{ data: { accepted: number } }>("/api/invitations/accept", { method: "POST" }).catch(() => undefined);
-    const farmRows = await requestAllPages<unknown>(`${window.location.origin}/api/farms`);
+    const [farmRows, applicationRows] = await Promise.all([
+      requestAllPages<unknown>(`${window.location.origin}/api/farms`),
+      requestAllPages<FarmApplication>(`${window.location.origin}/api/farm-applications`),
+    ]);
     const loadedFarms = farmRows.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
     const savedFarmId = preferredFarmId ?? window.localStorage.getItem(ACTIVE_FARM_STORAGE_KEY);
     setFarms(loadedFarms);
+    setFarmApplications(applicationRows);
     setFarmBatches([]);
     setDailyRecords([]);
     setDashboard(null);
@@ -404,12 +492,16 @@ export default function FlockLedgerApp({
     let active = true;
     request<{ data: { accepted: number } }>("/api/invitations/accept", { method: "POST" })
       .catch(() => ({ data: { accepted: 0 } }))
-      .then(() => requestAllPages<unknown>(`${window.location.origin}/api/farms`))
-      .then((farmRows) => {
+      .then(() => Promise.all([
+        requestAllPages<unknown>(`${window.location.origin}/api/farms`),
+        requestAllPages<FarmApplication>(`${window.location.origin}/api/farm-applications`),
+      ]))
+      .then(([farmRows, applicationRows]) => {
         if (!active) return;
         const loadedFarms = farmRows.map(normalizeFarm).filter((farm): farm is Farm => farm !== null);
         const savedFarmId = window.localStorage.getItem(ACTIVE_FARM_STORAGE_KEY);
         setFarms(loadedFarms);
+        setFarmApplications(applicationRows);
         setFarmId(
           loadedFarms.find((farm) => farm.id === savedFarmId)?.id
           ?? loadedFarms[0]?.id
@@ -421,6 +513,7 @@ export default function FlockLedgerApp({
         if (!active) return;
         if (error instanceof RequestError && error.status === 401) {
           setAuthenticated(false);
+          setIsPlatformAdmin(false);
           return;
         }
         setPageError(error instanceof Error ? error.message : "Could not load your farms.");
@@ -555,24 +648,30 @@ export default function FlockLedgerApp({
     const form = new FormData(event.currentTarget);
     const name = String(form.get("farmName") ?? "").trim();
     const openingCashBalanceKes = Number(form.get("openingBalance") || 0);
+    farmApplicationIdempotencyKey.current ??= crypto.randomUUID();
     try {
-      const created = await request<{ data: { id: string } }>("/api/farms", {
+      await request<{ data: { applicationId: string; farmId: string; status: string } }>("/api/farms", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": farmApplicationIdempotencyKey.current,
+        },
         body: JSON.stringify({ name, openingCashBalanceKes }),
       });
       setDialog(null);
       try {
-        await loadFarms(created.data.id);
+        await loadFarms();
       } catch (error) {
         setLoadingDashboard(false);
         setPageError(
           error instanceof Error
-            ? `Farm was created, but the farm list could not be refreshed. ${error.message}`
-            : "Farm was created, but the farm list could not be refreshed. Reload the page.",
+            ? `Application was submitted, but the application list could not be refreshed. ${error.message}`
+            : "Application was submitted, but the application list could not be refreshed. Reload the page.",
         );
         return;
       }
-      setFeedback("Farm created and selected. You are its owner.");
+      farmApplicationIdempotencyKey.current = null;
+      setFeedback("Farm application submitted for platform review. You can start recording after approval.");
     } catch (error) {
       setFarmError(error instanceof Error ? error.message : "Could not create farm.");
     } finally {
@@ -648,7 +747,7 @@ export default function FlockLedgerApp({
     }
   }
 
-  async function handleUpdateMemberRole(userId: string, role: "manager" | "attendant" | "accountant" | "veterinarian" | "owner") {
+  async function handleUpdateMemberRole(userId: string, role: "manager" | "attendant" | "accountant" | "veterinarian" | "inventory_officer" | "owner") {
     if (!activeFarm || activeFarm.role !== "owner") return;
     setTeamError("");
     setTeamNotice("");
@@ -873,7 +972,11 @@ export default function FlockLedgerApp({
         ? "Daily records"
         : tab === "revenue"
           ? "Revenue"
-          : "Billing";
+          : tab === "audit"
+            ? "Audit history"
+            : tab === "platform"
+              ? "Platform administration"
+              : "Billing";
 
   return (
     <main className="app-shell">
@@ -900,23 +1003,36 @@ export default function FlockLedgerApp({
             ["batches", "Flock batches", "batch"],
             ["daily", "Daily records", "daily"],
             ["revenue", "Revenue", "sales"],
+            ...(canViewAudit ? [["audit", "Audit history", "sales"] as const] : []),
+            ...(isPlatformAdmin ? [["platform", "Platform administration", "billing"] as const] : []),
           ] as const).map(([id, label, icon]) => (
-            <button className={`nav-link ${tab === id ? "active" : ""}`} type="button" key={id} onClick={() => navigateToTab(id)}>
-              <span className="nav-icon"><Icon name={icon} /></span>{label}
-              {id === "batches" && runningBatches.length > 0 && <span className="nav-count">{runningBatches.length}</span>}
+            <button
+              className={`nav-link ${tab === id ? "active" : ""}`}
+              type="button"
+              key={id}
+              aria-label={label}
+              aria-current={tab === id ? "page" : undefined}
+              title={label}
+              onClick={() => navigateToTab(id)}
+            >
+              <span className="nav-icon"><Icon name={icon} /></span>
+              <span className="nav-label">{label}</span>
+              {id === "batches" && runningBatches.length > 0 && <span className="nav-count" aria-label={`${runningBatches.length} active batches`}>{runningBatches.length}</span>}
             </button>
           ))}
           {activeFarm?.role === "owner" && (
             <button
               className="nav-link"
               type="button"
+              aria-label="Manage team"
+              title="Manage team"
               onClick={() => {
                 openDialog("team");
                 void loadTeam();
               }}
             >
               <span className="nav-icon"><Icon name="bird" /></span>
-              Team
+              <span className="nav-label">Team</span>
             </button>
           )}
           <button
@@ -937,7 +1053,7 @@ export default function FlockLedgerApp({
           </button>
         </nav>
         <div className="sidebar-bottom">
-          <button className="profile-button" type="button" onClick={handleSignOut} disabled={busy}>
+          <button className="profile-button" type="button" aria-label="Sign out" title="Sign out" onClick={handleSignOut} disabled={busy}>
             <span className="profile-avatar">{activeFarm?.role?.slice(0, 1).toUpperCase() ?? "F"}</span>
             <span className="profile-text"><strong>{activeFarm?.role ?? "Farm member"}</strong><small>Sign out</small></span>
             <span className="profile-arrow" aria-hidden="true">↗</span>
@@ -950,33 +1066,71 @@ export default function FlockLedgerApp({
           <div className="breadcrumb"><span>Workspace</span><span className="crumb-separator">/</span><strong>{selectedTabTitle}</strong></div>
           <div className="topbar-actions">
             <span className="date-chip"><span className="status-dot" />{shortDate(todayInNairobi())}</span>
-            {tab === "daily" || (tab !== "revenue" && tab !== "billing" && canCreateBatches) ? (
-              <button className="button button-primary topbar-add" type="button" disabled={!activeFarm} onClick={() => openDialog(tab === "daily" ? "daily" : "batch")}>
+            <div className="topbar-farm-picker">
+              {farms.length > 0 ? (
+                <FarmPicker farms={farms} selectedFarmId={farmId} onSelect={handleFarmSelection} onAddFarm={() => openDialog("farm")} />
+              ) : (
+                <button className="farm-picker add-farm-picker" type="button" onClick={() => openDialog("farm")}>
+                  <span>Register new farm</span>
+                </button>
+              )}
+            </div>
+            {tab === "daily" || (tab !== "revenue" && tab !== "audit" && tab !== "platform" && tab !== "billing" && canCreateBatches) ? (
+              <button className="button button-primary topbar-add" type="button" disabled={!farmIsActive} onClick={() => openDialog(tab === "daily" ? "daily" : "batch")}>
                 {tab === "daily" ? "Add daily record" : "New batch"}
               </button>
             ) : null}
+            <MobileAccountMenu
+              isOwner={activeFarm?.role === "owner"}
+              busy={busy}
+              extraLinks={[
+                ...(canViewAudit && activeFarm ? [{ label: "Audit history", onClick: () => navigateToTab("audit") }] : []),
+                ...(isPlatformAdmin ? [{ label: "Platform administration", onClick: () => navigateToTab("platform") }] : []),
+                ...(activeFarm ? [{ label: "Billing", onClick: () => navigateToTab("billing") }] : []),
+              ]}
+              onTeam={() => { openDialog("team"); void loadTeam(); }}
+              onSignOut={() => void handleSignOut()}
+            />
           </div>
         </header>
 
         <div className="page-content">
-          {farms.length > 0 && (
-            <div className="mobile-farm-tools">
-              <FarmPicker farms={farms} selectedFarmId={farmId} compact onSelect={handleFarmSelection} onAddFarm={() => openDialog("farm")} />
-            </div>
-          )}
           {pageError && <div className="notice error-notice page-notice" role="alert">{pageError}<button type="button" aria-label="Dismiss error" onClick={() => setPageError("")}>×</button></div>}
           {feedback && <div className="notice success-notice page-notice" role="status">{feedback}<button type="button" aria-label="Dismiss message" onClick={() => setFeedback("")}>×</button></div>}
           {!farms.length ? (
-            <section className="welcome-card">
+            isPlatformAdmin && tab === "platform" ? (
+              <PlatformAdminPage />
+            ) : <section className="welcome-card">
               <span className="welcome-icon"><Icon name="bird" /></span>
-              <p className="eyebrow">A good place to begin</p>
-              <h1>Set up your farm workspace</h1>
-              <p>Add your farm details to start recording batches, daily activity, and performance.</p>
-              <button className="button button-primary" type="button" onClick={() => openDialog("farm")}>Register new farm</button>
+              <p className="eyebrow">{farmApplications.length ? "APPLICATION STATUS" : "A good place to begin"}</p>
+              <h1>{farmApplications.length ? "Your farm application is under review" : "Apply for a farm workspace"}</h1>
+              <p>{farmApplications.length
+                ? "You can start recording farm activity after a platform administrator approves your application."
+                : "Submit your farm details for approval. Farm access is enabled after a platform administrator reviews your application."}</p>
+              {farmApplications.map((application) => (
+                <div className="notice" role="status" key={application.id}>
+                  <strong>{application.farm_name}</strong> · {application.status.replaceAll("_", " ")}
+                  {application.decision_reason && <p>{application.decision_reason}</p>}
+                </div>
+              ))}
+              <button className="button button-primary" type="button" onClick={() => openDialog("farm")}>Submit another application</button>
               {farmError && <p className="inline-error" role="alert">{farmError}</p>}
             </section>
           ) : !activeFarm ? (
             <div className="loading-card">Loading selected farm…</div>
+          ) : tab === "platform" ? (
+            isPlatformAdmin
+              ? <PlatformAdminPage />
+              : <section className="welcome-card"><h1>Platform access is restricted</h1><p>This area is available only to platform administrators.</p></section>
+          ) : !farmIsActive && tab !== "audit" ? (
+            <section className="welcome-card">
+              <span className="welcome-icon"><Icon name="bird" /></span>
+              <p className="eyebrow">FARM ACCESS</p>
+              <h1>{activeFarm.lifecycle_status === "suspended" ? "Farm access is read-only" : "Farm is not active"}</h1>
+              <p>{activeFarm.lifecycle_status === "suspended"
+                ? "You can review permitted records, but changes are disabled while the farm is suspended."
+                : "This farm cannot record transactions until its status is active."}</p>
+            </section>
           ) : tab === "overview" ? (
             <Overview
               farm={activeFarm}
@@ -1000,10 +1154,15 @@ export default function FlockLedgerApp({
               farmName={activeFarm.name}
               batches={farmBatches}
               loadingBatches={loadingDashboard}
-              canRecord={activeFarm.role === "owner" || activeFarm.role === "manager" || activeFarm.role === "accountant"}
-              canDownloadReceipts={canEditRecords}
+              canCreateSales={farmIsActive && ["owner", "manager", "accountant"].includes(activeFarm.role)}
+              canRecordPayments={farmIsActive && ["owner", "accountant"].includes(activeFarm.role)}
+              canDownloadReceipts={["owner", "manager", "accountant"].includes(activeFarm.role)}
               onFeedback={setFeedback}
             />
+          ) : tab === "audit" ? (
+            canViewAudit
+              ? <AuditPage key={activeFarm.id} farmId={activeFarm.id} role={activeFarm.role} />
+              : <section className="welcome-card"><h1>Audit access is restricted</h1><p>Your farm role does not include audit visibility.</p></section>
           ) : (
             <FarmSubscriptionPage
               key={activeFarm.id}
@@ -1015,13 +1174,22 @@ export default function FlockLedgerApp({
         </div>
       </section>
 
+      <BottomTabs tab={tab} batchCount={runningBatches.length} onChange={navigateToTab} />
+
       {dialog && (
         <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDialog(null); }}>
-          <section className={`dialog-card ${dialog === "daily" ? "daily-dialog-card" : ""}`} role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+          <section
+            ref={dialogCardRef}
+            className={`dialog-card ${dialog === "daily" ? "daily-dialog-card" : ""}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dialog-title"
+            tabIndex={-1}
+          >
             <div className="dialog-heading">
               <div>
-                <p className="eyebrow">{dialog === "farm" ? farms.length ? "ADD TO YOUR WORKSPACE" : "FARM SETUP" : dialog === "batch" ? "FLOCK MANAGEMENT" : dialog === "team" ? "OWNER CONTROLS" : "DAILY HOUSE LOG"}</p>
-                <h2 id="dialog-title">{dialog === "farm" ? farms.length ? "Add another farm" : "Create a farm" : dialog === "batch" ? "Start a new batch" : dialog === "team" ? "Manage your team" : "Record today’s activity"}</h2>
+                <p className="eyebrow">{dialog === "farm" ? "CONTROLLED ONBOARDING" : dialog === "batch" ? "FLOCK MANAGEMENT" : dialog === "team" ? "OWNER CONTROLS" : "DAILY HOUSE LOG"}</p>
+                <h2 id="dialog-title">{dialog === "farm" ? "Apply for a farm" : dialog === "batch" ? "Start a new batch" : dialog === "team" ? "Manage your team" : "Record today’s activity"}</h2>
                 {dialog === "daily" && <p className="dialog-description">Choose a flock and date, then record what happened in the house.</p>}
               </div>
               <button className="dialog-close" type="button" aria-label="Close dialog" onClick={() => setDialog(null)}>×</button>
@@ -1085,6 +1253,7 @@ export default function FlockLedgerApp({
                         <option value="attendant">Worker (Attendant)</option>
                         <option value="veterinarian">Veterinarian</option>
                         <option value="accountant">Accountant</option>
+                        <option value="inventory_officer">Inventory officer</option>
                       </select>
                     </label>
                   </div>
@@ -1114,7 +1283,7 @@ export default function FlockLedgerApp({
                                 value={member.role}
                                 onChange={(event) => void handleUpdateMemberRole(
                                   member.user_id,
-                                  event.target.value as "manager" | "attendant" | "accountant" | "veterinarian",
+                                  event.target.value as "manager" | "attendant" | "accountant" | "veterinarian" | "inventory_officer",
                                 )}
                                 disabled={busy}
                               >
@@ -1122,6 +1291,7 @@ export default function FlockLedgerApp({
                                 <option value="attendant">Worker (Attendant)</option>
                                 <option value="veterinarian">Veterinarian</option>
                                 <option value="accountant">Accountant</option>
+                                <option value="inventory_officer">Inventory officer</option>
                               </select>
                               <button type="button" onClick={() => void handleRemoveMember(member.user_id)} disabled={busy}>
                                 Remove
@@ -1149,11 +1319,12 @@ export default function FlockLedgerApp({
                 )}
               </div>
             ) : dialog === "farm" ? (
-              <form className="form-stack dialog-form" onSubmit={handleFarmCreate}>
+              <form className="form-stack dialog-form" onSubmit={handleFarmCreate} onChange={() => { farmApplicationIdempotencyKey.current = null; }}>
+                <p className="dialog-description">Farm access is enabled after a platform administrator reviews your application.</p>
                 <label>Farm name<input name="farmName" required autoFocus maxLength={128} placeholder="e.g. Green Valley Poultry" /></label>
-                <label>Opening cash balance <span className="field-note">KES</span><input name="openingBalance" type="number" min="0" step="0.01" defaultValue="0" /></label>
+                <label>Opening cash balance <span className="field-note">KES</span><input name="openingBalance" type="number" min="0" step="0.01" defaultValue="0" /><small>Captured once and effective only after approval.</small></label>
                 {farmError && <p className="inline-error" role="alert">{farmError}</p>}
-                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Creating…" : farms.length ? "Add farm" : "Create farm"}</button></div>
+                <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Submitting…" : "Submit application"}</button></div>
               </form>
             ) : dialog === "batch" ? (
               <form className="form-stack dialog-form" onSubmit={handleBatchCreate}>

@@ -155,6 +155,7 @@ export default function PricingContent({
 
             <details className="pricing-comparison">
               <summary>Compare plan features</summary>
+              <p className="table-scroll-hint">Swipe sideways to compare every plan →</p>
               <div className="pricing-table-scroll">
                 <table>
                   <thead>

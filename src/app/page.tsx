@@ -6,6 +6,7 @@ import {
   LandingNavActions,
   LandingSessionProvider,
 } from "@/components/landing-session";
+import { MobileNavMenu } from "@/components/mobile-navigation";
 
 export const instant = false;
 
@@ -30,6 +31,7 @@ export default function Home() {
           <Link href="/faq">FAQ</Link>
         </div>
         <div className="landing-nav-actions">
+          <MobileNavMenu />
           <LandingNavActions />
         </div>
       </nav>

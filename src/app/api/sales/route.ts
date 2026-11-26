@@ -4,7 +4,7 @@ import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { revenueCursorSchema, revenueLedgerPageSchema } from "@/lib/revenue/sales";
 import { saleCreateSchema, salesListQuerySchema } from "@/lib/validation/sales";
-import { payloadHash, requireIdempotencyKey } from "@/lib/security";
+import { requireIdempotencyKey } from "@/lib/security";
 import { parsePagination } from "@/lib/api/pagination";
 
 export async function GET(request: NextRequest) {
@@ -119,19 +119,6 @@ export async function POST(request: NextRequest) {
       p_receipt_number: sale.receiptNumber ?? null,
       p_remarks: sale.remarks ?? null,
       p_idempotency_key: idempotencyKey,
-      p_payload_hash: payloadHash({
-        farmId: sale.farmId,
-        batchId: sale.batchId,
-        saleDate: sale.saleDate,
-        customer: sale.customer,
-        birdsSold: sale.birdsSold,
-        totalWeightKg: sale.totalWeightKg,
-        priceBasis: sale.priceBasis,
-        priceKes: sale.priceKes,
-        paidKes: sale.paidKes,
-        receiptNumber: sale.receiptNumber ?? null,
-        remarks: sale.remarks ?? null,
-      }),
     });
     if (error) {
       if (error.code === "42501") return apiError("You cannot record sales for this farm.", 403);

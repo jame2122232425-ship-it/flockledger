@@ -4,6 +4,7 @@ import {
   LandingNavActions,
   LandingSessionProvider,
 } from "@/components/landing-session";
+import { MobileNavMenu } from "@/components/mobile-navigation";
 import LegalPageContent from "@/components/legal-page-content";
 import PricingContent from "@/components/pricing-content";
 
@@ -207,7 +208,10 @@ function MarketingNav() {
         <Link href="/guides">Guides</Link>
         <Link href="/faq">FAQ</Link>
       </div>
-      <div className="landing-nav-actions"><LandingNavActions /></div>
+      <div className="landing-nav-actions">
+        <MobileNavMenu featuresHref="/#features" />
+        <LandingNavActions />
+      </div>
     </nav>
   );
 }

@@ -10,7 +10,7 @@ import {
 
 const memberSchema = z.object({
   userId: z.string().uuid(),
-  role: z.enum(["owner", "manager", "attendant", "accountant", "veterinarian"]),
+  role: z.enum(["owner", "manager", "attendant", "accountant", "veterinarian", "inventory_officer"]),
 });
 
 type RouteContext = { params: Promise<{ farmId: string }> };
@@ -95,16 +95,18 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    const { data, error } = await supabase.from("farm_memberships").delete()
-      .eq("farm_id", farmId).eq("user_id", userId).select("user_id").maybeSingle();
+    const { data, error } = await supabase.rpc("remove_farm_member", {
+      p_farm_id: farmId,
+      p_user_id: userId,
+    });
     if (error) {
       if (error.code === "42501") return apiError("Only farm owners can remove members.", 403);
       if (error.code === "P0001") return apiError(error.message, 409);
+      if (error.code === "P0002") return apiError("Farm member not found.", 404);
       console.error("Failed to remove farm member:", error.code);
       return apiError("Could not remove farm member.", 500);
     }
-    if (!data) return apiError("Farm member not found.", 404);
-    return NextResponse.json({ data: { removed: true } });
+    return NextResponse.json({ data });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) return apiError(error.message, 503);
     console.error("Unexpected farm member removal error:", error);

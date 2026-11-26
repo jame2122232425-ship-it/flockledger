@@ -23,6 +23,7 @@ export const revenueLedgerPageSchema = z.object({
     price_kes: z.number().nullable(),
     amount_kes: z.number(),
     paid_kes: z.number(),
+    unreconciled_paid_kes: z.number(),
     outstanding_kes: z.number(),
     payment_status: z.enum(["paid", "partial", "unpaid"]),
     receipt_number: z.string().nullable(),
@@ -34,6 +35,7 @@ export const revenueLedgerPageSchema = z.object({
     sales_kes: z.number(),
     received_kes: z.number(),
     outstanding_kes: z.number(),
+    unreconciled_paid_kes: z.number(),
     sale_count: z.number().int().nonnegative(),
   }),
   hasMore: z.boolean(),
@@ -73,6 +75,11 @@ type SaleCorrectionRow = {
   created_at: string;
 };
 
+type SaleRefundRow = {
+  sale_id: string;
+  amount_kes: number | string;
+};
+
 export type RevenueSale = {
   id: string;
   farm_id: string;
@@ -85,6 +92,7 @@ export type RevenueSale = {
   price_kes: number | null;
   amount_kes: number;
   paid_kes: number;
+  unreconciled_paid_kes: number;
   outstanding_kes: number;
   payment_status: RevenueSaleStatus;
   receipt_number: string | null;
@@ -118,10 +126,14 @@ export function buildRevenueSales(
   payments: SalePaymentRow[],
   corrections: SaleCorrectionRow[],
   farmId: string,
+  refunds: SaleRefundRow[] = [],
 ): RevenueSale[] {
   const paidBySale = new Map<string, number>();
   for (const payment of payments) {
     paidBySale.set(payment.sale_id, (paidBySale.get(payment.sale_id) ?? 0) + cents(payment.amount_kes));
+  }
+  for (const refund of refunds) {
+    paidBySale.set(refund.sale_id, (paidBySale.get(refund.sale_id) ?? 0) - cents(refund.amount_kes));
   }
 
   const correctionsBySale = new Map<string, SaleCorrectionRow[]>();
@@ -136,8 +148,9 @@ export function buildRevenueSales(
     const saleCorrections = correctionsBySale.get(sale.id) ?? [];
     const amountCents = cents(sale.amount_kes)
       + saleCorrections.reduce((sum, correction) => sum + cents(correction.revenue_kes_delta), 0);
-    const paidCents = (paidBySale.get(sale.id) ?? 0)
-      + saleCorrections.reduce((sum, correction) => sum + cents(correction.paid_kes_delta), 0);
+    const paidCents = paidBySale.get(sale.id) ?? 0;
+    const unreconciledPaidCents = saleCorrections
+      .reduce((sum, correction) => sum + cents(correction.paid_kes_delta), 0);
 
     return {
       id: sale.id,
@@ -153,6 +166,7 @@ export function buildRevenueSales(
       price_kes: Number(sale.price_kes),
       amount_kes: amountCents / 100,
       paid_kes: paidCents / 100,
+      unreconciled_paid_kes: unreconciledPaidCents / 100,
       outstanding_kes: Math.max(amountCents - paidCents, 0) / 100,
       payment_status: statusFor(amountCents, paidCents),
       receipt_number: sale.receipt_number,
@@ -165,7 +179,7 @@ export function buildRevenueSales(
   for (const correction of corrections) {
     if (correction.source_record_id) continue;
     const amountCents = cents(correction.revenue_kes_delta);
-    const paidCents = cents(correction.paid_kes_delta);
+    const unreconciledPaidCents = cents(correction.paid_kes_delta);
     records.push({
       id: `correction:${correction.id}`,
       farm_id: farmId,
@@ -177,9 +191,10 @@ export function buildRevenueSales(
       price_basis: null,
       price_kes: null,
       amount_kes: amountCents / 100,
-      paid_kes: paidCents / 100,
-      outstanding_kes: Math.max(amountCents - paidCents, 0) / 100,
-      payment_status: statusFor(amountCents, paidCents),
+      paid_kes: 0,
+      unreconciled_paid_kes: unreconciledPaidCents / 100,
+      outstanding_kes: Math.max(amountCents, 0) / 100,
+      payment_status: statusFor(amountCents, 0),
       receipt_number: null,
       remarks: correction.reason,
       created_at: correction.created_at,
@@ -206,10 +221,15 @@ export function filterRevenueSales(
 export function summarizeRevenueSales(sales: RevenueSale[]) {
   const totalCents = sales.reduce((sum, sale) => sum + cents(sale.amount_kes), 0);
   const receivedCents = sales.reduce((sum, sale) => sum + cents(sale.paid_kes), 0);
+  const unreconciledPaidCents = sales.reduce(
+    (sum, sale) => sum + cents(sale.unreconciled_paid_kes),
+    0,
+  );
   return {
     sales_kes: totalCents / 100,
     received_kes: receivedCents / 100,
     outstanding_kes: Math.max(totalCents - receivedCents, 0) / 100,
+    unreconciled_paid_kes: unreconciledPaidCents / 100,
     sale_count: sales.length,
   };
 }
