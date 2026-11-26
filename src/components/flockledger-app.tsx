@@ -905,7 +905,6 @@ export default function FlockLedgerApp({
             ["batches", "Flock batches", "batch"],
             ["daily", "Daily records", "daily"],
             ["revenue", "Revenue", "sales"],
-            ["billing", "Billing", "billing"],
           ] as const).map(([id, label, icon]) => (
             <button className={`nav-link ${tab === id ? "active" : ""}`} type="button" key={id} onClick={() => navigateToTab(id)}>
               <span className="nav-icon"><Icon name={icon} /></span>{label}
