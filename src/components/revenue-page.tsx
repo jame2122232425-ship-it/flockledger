@@ -6,10 +6,18 @@ import { Icon } from "@/components/app-icon";
 import { Metric } from "@/components/metric-card";
 import { PaginationControls } from "@/components/pagination-controls";
 import { request } from "@/lib/client/request";
-import { formatKes, formatNumber, shortDate, todayInNairobi } from "@/lib/format";
+import { dateTimeInNairobi, formatKes, formatNumber, shortDate, todayInNairobi } from "@/lib/format";
 import type { PageMetadata } from "@/lib/api/pagination";
 import type { FarmBatch } from "@/lib/farm/types";
 import type { RevenueCursor, RevenueSale, RevenueSaleStatus } from "@/lib/revenue/sales";
+import {
+  downloadPaymentReceiptPdf,
+  downloadSaleReceiptPdf,
+  formatPaymentReference,
+  printPaymentReceiptPdf,
+  printSaleReceiptPdf,
+  type PaymentReceipt,
+} from "@/lib/revenue/receipts";
 import { saleCreateSchema, salePaymentCreateSchema } from "@/lib/validation/sales";
 
 type RevenueSummary = {
@@ -27,25 +35,36 @@ type RevenueFilters = {
   search: string;
 };
 
-type SalePayment = {
-  id: string;
-  payment_date: string;
-  amount_kes: number | string;
-  reference: string | null;
-  created_at: string;
-};
+type SalePayment = PaymentReceipt;
+
+type RevenueDetail =
+  | { type: "sale"; sale: RevenueSale }
+  | { type: "payment"; sale: RevenueSale; payment: SalePayment };
+
+function RevenueDetailField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value || "—"}</dd>
+    </div>
+  );
+}
 
 export function RevenuePage({
   farmId,
+  farmName,
   batches,
   loadingBatches,
   canRecord,
+  canDownloadReceipts,
   onFeedback,
 }: {
   farmId: string;
+  farmName: string;
   batches: FarmBatch[];
   loadingBatches: boolean;
   canRecord: boolean;
+  canDownloadReceipts: boolean;
   onFeedback: (message: string) => void;
 }) {
   const [filters, setFilters] = useState<RevenueFilters>({
@@ -95,6 +114,8 @@ export function RevenuePage({
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
+  const [selectedDetail, setSelectedDetail] = useState<RevenueDetail | null>(null);
   const requestId = useRef(0);
 
   useEffect(() => {
@@ -115,7 +136,17 @@ export function RevenuePage({
     return () => window.clearTimeout(timer);
   }, [paymentError]);
 
+  useEffect(() => {
+    if (!receiptError) return;
+    const timer = window.setTimeout(() => setReceiptError(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [receiptError]);
+
   const runningBatches = batches.filter((batch) => batch.status === "running");
+  const batchById = useMemo(
+    () => new Map(batches.map((batch) => [batch.id, batch])),
+    [batches],
+  );
   const batchNames = useMemo(
     () => new Map(batches.map((batch) => [batch.id, batch.batch_code])),
     [batches],
@@ -249,12 +280,96 @@ export function RevenuePage({
     setPaymentPage(1);
     setPaymentLoading(true);
     setPaymentError("");
+    setSelectedDetail(null);
     setPaymentSale(sale);
+  }
+
+  function openSaleDetails(sale: RevenueSale) {
+    setReceiptError("");
+    setSelectedDetail({ type: "sale", sale });
+  }
+
+  function openPaymentDetails(sale: RevenueSale, payment: SalePayment) {
+    setPaymentSale(null);
+    setReceiptError("");
+    setSelectedDetail({ type: "payment", sale, payment });
   }
 
   function changePaymentPage(nextPage: number) {
     setPaymentPage(nextPage);
     setPaymentLoading(true);
+  }
+
+  async function handleSaleReceiptDownload(sale: RevenueSale) {
+    setReceiptError("");
+    try {
+      const batch = batchById.get(sale.batch_id);
+      await downloadSaleReceiptPdf(sale, farmName, batch?.batch_code ?? "Batch", batch?.batch_type);
+    } catch (downloadError) {
+      console.error("Failed to generate sale receipt PDF:", downloadError);
+      setReceiptError("Could not generate the sale receipt PDF. Please try again.");
+    }
+  }
+
+  async function handleSaleReceiptPrint(sale: RevenueSale) {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setReceiptError("Allow pop-ups to print the receipt.");
+      return;
+    }
+    setReceiptError("");
+    try {
+      const batch = batchById.get(sale.batch_id);
+      await printSaleReceiptPdf(
+        sale,
+        farmName,
+        batch?.batch_code ?? "Batch",
+        batch?.batch_type,
+        printWindow,
+      );
+    } catch (printError) {
+      printWindow.close();
+      console.error("Failed to prepare sale receipt for printing:", printError);
+      setReceiptError("Could not open the sale receipt for printing. Please try again.");
+    }
+  }
+
+  async function handlePaymentReceiptDownload(payment: SalePayment, sale: RevenueSale) {
+    setReceiptError("");
+    try {
+      const batch = batchById.get(sale.batch_id);
+      await downloadPaymentReceiptPdf(payment, {
+        farmName,
+        batchCode: batch?.batch_code ?? "Batch",
+        batchType: batch?.batch_type,
+        sale,
+      });
+    } catch (downloadError) {
+      console.error("Failed to generate payment receipt PDF:", downloadError);
+      setReceiptError("Could not generate the payment receipt PDF. Please try again.");
+    }
+  }
+
+  async function handlePaymentReceiptPrint(payment: SalePayment, sale: RevenueSale) {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      setReceiptError("Allow pop-ups to print the receipt.");
+      return;
+    }
+    setReceiptError("");
+    try {
+      const batch = batchById.get(sale.batch_id);
+      await printPaymentReceiptPdf(payment, {
+        farmName,
+        batchCode: batch?.batch_code ?? "Batch",
+        batchType: batch?.batch_type,
+        sale,
+      }, printWindow);
+    } catch (printError) {
+      printWindow.close();
+      console.error("Failed to prepare payment receipt for printing:", printError);
+      setReceiptError("Could not open the payment receipt for printing. Please try again.");
+    }
   }
 
   async function handleSaleCreate(event: FormEvent<HTMLFormElement>) {
@@ -317,7 +432,7 @@ export function RevenuePage({
     setPaymentBusy(true);
     setPaymentError("");
     try {
-      await request<{ data: SalePayment }>(
+      const { data: recordedPayment } = await request<{ data: SalePayment }>(
         `/api/sales/${encodeURIComponent(paymentSale.id)}/payments`,
         {
           method: "POST",
@@ -326,13 +441,135 @@ export function RevenuePage({
         },
       );
       setPaymentSale(null);
-      onFeedback(`Payment of ${formatKes(parsed.data.amountKes)} recorded and added to the cashbook.`);
+      onFeedback(
+        `Payment of ${formatKes(parsed.data.amountKes)} recorded and added to the cashbook. Reference: ${formatPaymentReference(recordedPayment)}.`,
+      );
       setRefreshKey((current) => current + 1);
     } catch (createError) {
       setPaymentError(createError instanceof Error ? createError.message : "Could not record payment.");
     } finally {
       setPaymentBusy(false);
     }
+  }
+
+  if (selectedDetail) {
+    const sale = selectedDetail.sale;
+    const batch = batchById.get(sale.batch_id);
+    const paymentDetail = selectedDetail.type === "payment" ? selectedDetail : null;
+    const isPayment = paymentDetail !== null;
+    const payment = paymentDetail?.payment ?? null;
+    return (
+      <>
+        <div className="page-heading record-detail-heading revenue-detail-heading">
+          <div>
+            <p className="eyebrow">{isPayment ? "PAYMENT DETAILS" : "SALE DETAILS"}</p>
+            <h1>{isPayment ? "Payment receipt" : sale.customer}</h1>
+            <p className="page-subtitle">
+              {isPayment
+                ? `${shortDate(payment?.payment_date ?? sale.sale_date)} · ${batch?.batch_code ?? "Batch"}`
+                : `${shortDate(sale.sale_date)} · ${batch?.batch_code ?? "Batch"}`}
+            </p>
+          </div>
+          <div className="record-detail-actions">
+            {isPayment && (
+              <>
+                <button className="button button-quiet" type="button" onClick={() => openSaleDetails(sale)}>Sale details</button>
+                <button className="button button-quiet" type="button" onClick={() => openPaymentDialog(sale)}>Payment history</button>
+              </>
+            )}
+            <button className="button button-quiet" type="button" onClick={() => setSelectedDetail(null)}>Back to revenue</button>
+          </div>
+        </div>
+        <section className="content-card record-detail-card revenue-record-detail">
+          <div className="record-detail-status">
+            <span className={`revenue-status-pill ${sale.payment_status}`}>
+              {sale.payment_status === "partial" ? "Partial" : sale.payment_status}
+            </span>
+            {isPayment && <span className="revenue-status-pill paid">Payment received</span>}
+          </div>
+          {isPayment && payment ? (
+            <>
+              <section className="record-detail-section">
+                <h2>Transaction information</h2>
+                <dl className="record-detail-grid">
+                  <RevenueDetailField label="Buyer" value={sale.customer} />
+                  <RevenueDetailField label="Payment date" value={shortDate(payment.payment_date)} />
+                  <RevenueDetailField label="Amount received" value={formatKes(Number(payment.amount_kes))} />
+                  <RevenueDetailField label="Reference" value={formatPaymentReference(payment)} />
+                  <RevenueDetailField label="Related sale" value={sale.receipt_number ?? sale.id.slice(0, 8).toUpperCase()} />
+                  <RevenueDetailField label="Sale date" value={shortDate(sale.sale_date)} />
+                  <RevenueDetailField label="Batch" value={batch?.batch_code ?? "—"} />
+                  <RevenueDetailField label="Poultry type" value={batch?.batch_type ?? "—"} />
+                  <RevenueDetailField label="Recorded at (EAT)" value={dateTimeInNairobi(payment.created_at)} />
+                </dl>
+              </section>
+              <section className="record-detail-section">
+                <h2>Related sale balance</h2>
+                <dl className="record-detail-grid">
+                  <RevenueDetailField label="Sale total" value={formatKes(sale.amount_kes)} />
+                  <RevenueDetailField label="Current amount received" value={formatKes(sale.paid_kes)} />
+                  <RevenueDetailField label="Current outstanding balance" value={formatKes(sale.outstanding_kes)} />
+                </dl>
+                <p className="record-detail-note">The balance shown is current and may include payments recorded after this transaction.</p>
+              </section>
+            </>
+          ) : (
+            <>
+              <section className="record-detail-section">
+                <h2>Sale information</h2>
+                <dl className="record-detail-grid">
+                  <RevenueDetailField label="Buyer" value={sale.customer} />
+                  <RevenueDetailField label="Sale date" value={shortDate(sale.sale_date)} />
+                  <RevenueDetailField label="Sale reference" value={sale.receipt_number ?? "—"} />
+                  <RevenueDetailField label="Batch" value={batch?.batch_code ?? "—"} />
+                  <RevenueDetailField label="Poultry type" value={batch?.batch_type ?? "—"} />
+                  <RevenueDetailField label="Recorded at (EAT)" value={dateTimeInNairobi(sale.created_at)} />
+                  <RevenueDetailField label="Quantity sold" value={`${formatNumber(sale.birds_sold)} birds`} />
+                  <RevenueDetailField label="Live weight" value={`${formatNumber(sale.total_weight_kg, 2)} kg`} />
+                  <RevenueDetailField label="Price basis" value={sale.price_basis ?? "—"} />
+                  <RevenueDetailField label="Price per unit" value={sale.price_kes === null ? "—" : formatKes(sale.price_kes)} />
+                  <RevenueDetailField label="Notes" value={sale.remarks ?? "—"} />
+                </dl>
+              </section>
+              <section className="record-detail-section">
+                <h2>Payment summary</h2>
+                <dl className="record-detail-grid">
+                  <RevenueDetailField label="Sale total" value={formatKes(sale.amount_kes)} />
+                  <RevenueDetailField label="Amount received" value={formatKes(sale.paid_kes)} />
+                  <RevenueDetailField label="Outstanding balance" value={formatKes(sale.outstanding_kes)} />
+                </dl>
+                <button className="revenue-action-link primary" type="button" onClick={() => openPaymentDialog(sale)}>View payment history</button>
+              </section>
+            </>
+          )}
+          {canDownloadReceipts && (
+            <div className="record-detail-receipt-actions">
+              <button
+                className="button button-primary"
+                type="button"
+                onClick={() => {
+                  if (payment) void handlePaymentReceiptDownload(payment, sale);
+                  else void handleSaleReceiptDownload(sale);
+                }}
+              >
+                Download receipt PDF
+              </button>
+              <button
+                className="button button-quiet"
+                type="button"
+                onClick={() => {
+                  if (payment) void handlePaymentReceiptPrint(payment, sale);
+                  else void handleSaleReceiptPrint(sale);
+                }}
+              >
+                Print receipt
+              </button>
+            </div>
+          )}
+          {receiptError && <p className="inline-error" role="alert">{receiptError}</p>}
+        </section>
+      </>
+    );
   }
 
   return (
@@ -383,6 +620,7 @@ export function RevenuePage({
           <span className="table-hint">{formatNumber(pagination.total)} {pagination.total === 1 ? "entry" : "entries"}</span>
         </div>
         {displayError && <div className="notice error-notice revenue-error" role="alert">{displayError}</div>}
+        {receiptError && <p className="inline-error" role="alert">{receiptError}</p>}
         {dateRangeError ? (
           <div className="empty-inline" role="status">Update the date range to view revenue.</div>
         ) : loading ? (
@@ -403,7 +641,7 @@ export function RevenuePage({
                       <td>{formatKes(sale.paid_kes)}</td>
                       <td className={sale.outstanding_kes > 0 ? "revenue-due-value" : ""}>{formatKes(sale.outstanding_kes)}</td>
                       <td><span className={`revenue-status-pill ${sale.payment_status}`}>{sale.payment_status === "partial" ? "Partial" : sale.payment_status}</span>{sale.is_adjustment && <span className="revenue-adjustment-tag">Adjustment</span>}</td>
-                      <td><div className="revenue-row-actions">{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>}{canRecord && !sale.is_adjustment && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div></td>
+                      <td><div className="revenue-row-actions">{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openSaleDetails(sale)}>Details</button>}{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>}{canDownloadReceipts && !sale.is_adjustment && <><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptDownload(sale)}>PDF</button><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptPrint(sale)}>Print</button></>}{canRecord && !sale.is_adjustment && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div></td>
                     </tr>
                   ))}
                 </tbody>
@@ -424,6 +662,8 @@ export function RevenuePage({
                   </div>
                   <div className="revenue-mobile-card-bottom">
                     <span>{formatNumber(sale.birds_sold)} birds · {formatNumber(sale.total_weight_kg, 2)} kg</span>
+                    {!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openSaleDetails(sale)}>Sale details</button>}
+                    {!sale.is_adjustment && canDownloadReceipts && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptDownload(sale)}>PDF</button><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptPrint(sale)}>Print</button></div>}
                     {!sale.is_adjustment && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>{canRecord && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div>}
                   </div>
                 </article>
@@ -488,7 +728,7 @@ export function RevenuePage({
               {paymentLoading ? <p className="empty-inline">Loading payment history…</p> : paymentHistory.length ? (
                 <ul className="payment-history-list">
                   {paymentHistory.map((payment) => (
-                    <li key={payment.id}><span><strong>{shortDate(payment.payment_date)}</strong><small>{payment.reference || "No reference"}</small></span><strong>{formatKes(Number(payment.amount_kes))}</strong></li>
+                    <li key={payment.id}><span><strong>{shortDate(payment.payment_date)}</strong><small>Recorded {dateTimeInNairobi(payment.created_at)}</small><small>Reference: {formatPaymentReference(payment)}</small></span><strong>{formatKes(Number(payment.amount_kes))}</strong><button type="button" className="revenue-action-link" onClick={() => openPaymentDetails(paymentSale, payment)}>Details</button>{canDownloadReceipts && <><button type="button" className="revenue-action-link" aria-label={`Download payment receipt for ${shortDate(payment.payment_date)}`} onClick={() => void handlePaymentReceiptDownload(payment, paymentSale)}>PDF</button><button type="button" className="revenue-action-link" aria-label={`Print payment receipt for ${shortDate(payment.payment_date)}`} onClick={() => void handlePaymentReceiptPrint(payment, paymentSale)}>Print</button></>}</li>
                   ))}
                 </ul>
               ) : <p className="empty-inline">No payment transactions recorded yet.</p>}
@@ -497,13 +737,14 @@ export function RevenuePage({
               )}
             </section>
             {paymentError && <p className="inline-error" role="alert">{paymentError}</p>}
+            {receiptError && <p className="inline-error" role="alert">{receiptError}</p>}
             {canRecord && paymentSale.outstanding_kes > 0 && (
               <form className="form-stack payment-entry-form" onSubmit={handlePaymentCreate}>
                 <h3>Record a payment</h3>
                 <div className="form-grid">
                   <label>Payment date<input type="date" required value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} /></label>
                   <label><span className="revenue-field-label">Amount received <small>KES</small></span><input name="amountKes" type="number" min="0.01" max={paymentSale.outstanding_kes} step="0.01" defaultValue={paymentSale.outstanding_kes} required /></label>
-                  <label className="field-span">Reference<input name="reference" maxLength={64} placeholder="Optional receipt or transaction reference" /></label>
+                  <label className="field-span">Reference<input name="reference" maxLength={64} placeholder="Leave blank to generate a temporary reference" /></label>
                 </div>
                 <div className="dialog-actions"><button type="button" className="button button-quiet" onClick={() => setPaymentSale(null)}>Cancel</button><button type="submit" className="button button-primary" disabled={paymentBusy}>{paymentBusy ? "Saving…" : "Record payment"}</button></div>
               </form>

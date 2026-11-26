@@ -45,7 +45,7 @@ function batchRequest() {
     method: "POST",
     body: JSON.stringify({
       farmId,
-      batchCode: "BR-2026-001",
+      batchCode: "BAT-0D4E7C3D",
       batchType: "Broiler",
       datePlaced: "2026-11-25",
       chicksReceived: 100,

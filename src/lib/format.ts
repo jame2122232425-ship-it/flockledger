@@ -31,3 +31,17 @@ export function shortDate(value: string) {
     timeZone: "Africa/Nairobi",
   }).format(new Date(`${value}T12:00:00+03:00`));
 }
+
+export function dateTimeInNairobi(value: string) {
+  return new Intl.DateTimeFormat("en-KE", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZone: "Africa/Nairobi",
+    timeZoneName: "short",
+  }).format(new Date(value));
+}

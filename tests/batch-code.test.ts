@@ -1,26 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { generateBatchCode } from "../src/lib/batches/batch-code";
+import { generateBatchCode, generateBatchCodeSuffix } from "../src/lib/batches/batch-code";
+import { batchCreateSchema } from "../src/lib/validation/batches";
+
+const batchInput = {
+  farmId: "11111111-1111-4111-8111-111111111111",
+  batchCode: "BAT-0D4E7C3D",
+  batchType: "Broiler",
+  datePlaced: "2026-11-12",
+  chicksReceived: 100,
+};
 
 describe("generateBatchCode", () => {
-  it("uses the farm initials, bird type, placement month, and monthly sequence", () => {
-    expect(generateBatchCode("Rosy Poultry Farm", "Broiler", "2026-11-12", "", []))
-      .toBe("RPF-BR-2611-01");
+  it("generates a twelve-character batch ID", () => {
+    expect(generateBatchCode("2026-11-12", "0D4E7C3D"))
+      .toBe("BAT-0D4E7C3D");
   });
 
-  it("increments the highest matching sequence without reusing skipped numbers", () => {
-    expect(generateBatchCode(
-      "Rosy Poultry Farm",
-      "Broiler",
-      "2026-11-28",
-      "",
-      ["RPF-BR-2611-01", "RPF-BR-2611-03", "RPF-KJ-2611-01"],
-    )).toBe("RPF-BR-2611-04");
+  it("rejects invalid dates and suffixes", () => {
+    expect(generateBatchCode("2026-02-30", "0D4E7C3D")).toBe("");
+    expect(generateBatchCode("2026-11-12", "0D4E7C3")).toBe("");
   });
 
-  it("adds a house token and returns no code for an invalid placement date", () => {
-    expect(generateBatchCode("Rosy Poultry Farm", "Kienyeji", "2026-11-20", "House A", []))
-      .toBe("RPF-KJ-A-2611-01");
-    expect(generateBatchCode("Rosy Poultry Farm", "Broiler", "2026-02-30", "", []))
-      .toBe("");
+  it("creates an eight-character uppercase alphanumeric suffix", () => {
+    expect(generateBatchCodeSuffix()).toMatch(/^[A-Z0-9]{8}$/);
+  });
+
+  it("accepts only the new twelve-character batch ID format", () => {
+    expect(batchCreateSchema.safeParse(batchInput).success).toBe(true);
+    expect(batchCreateSchema.safeParse({ ...batchInput, batchCode: "BAT-0D4E7C3" }).success).toBe(false);
+    expect(batchCreateSchema.safeParse({ ...batchInput, batchCode: "RPF-BR-2611-01" }).success).toBe(false);
   });
 });

@@ -1,9 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildRevenueSales,
   filterRevenueSales,
   summarizeRevenueSales,
 } from "../src/lib/revenue/sales";
+import {
+  createPaymentReceiptPdf,
+  createSaleReceiptPdf,
+  formatPaymentReference,
+  printSaleReceiptPdf,
+  type ReceiptPrintTarget,
+} from "../src/lib/revenue/receipts";
+import type { RevenueSale } from "../src/lib/revenue/sales";
 import {
   saleCreateSchema,
   salePaymentCreateSchema,
@@ -149,5 +157,88 @@ describe("revenue totals", () => {
       outstanding_kes: 1250,
       sale_count: 2,
     });
+  });
+});
+
+describe("revenue receipt PDFs", () => {
+  const sale: RevenueSale = {
+    id: saleId,
+    farm_id: farmId,
+    batch_id: "33333333-3333-4333-8333-333333333333",
+    sale_date: "2026-03-09",
+    customer: "Test buyer",
+    birds_sold: 5,
+    total_weight_kg: 12.5,
+    price_basis: "Kg",
+    price_kes: 100,
+    amount_kes: 1250,
+    paid_kes: 250,
+    outstanding_kes: 1000,
+    payment_status: "partial",
+    receipt_number: "SALE-001",
+    remarks: null,
+    created_at: "2026-03-09T08:00:00Z",
+    is_adjustment: false,
+  };
+
+  it("generates a sale PDF with the sale reference, buyer, and current balance", async () => {
+    const pdf = await createSaleReceiptPdf(sale, "Test Farm", "TEST-BATCH-01", "Broiler");
+    const output = pdf.output();
+
+    expect(output.startsWith("%PDF-")).toBe(true);
+    expect(output).toContain("SALE-001");
+    expect(output).toContain("Test buyer");
+    expect(output).toContain("Outstanding balance");
+    expect(output).toContain("1,000.00");
+    expect(output).toContain("11:00:00 EAT");
+    expect(output).toContain("FlockLedger");
+    expect(output).toContain("Broiler chickens");
+  });
+
+  it("uses the sale ID when no receipt reference exists", async () => {
+    const pdf = await createSaleReceiptPdf({ ...sale, receipt_number: null }, "Test Farm", "TEST-BATCH-01");
+    expect(pdf.output()).toContain(sale.id.slice(0, 8).toUpperCase());
+  });
+
+  it("formats generated temporary references as ten uppercase hexadecimal characters", () => {
+    expect(formatPaymentReference({
+      id: "55555555-5555-4555-8555-555555555555",
+      reference: "TMP-MPESA-0D4E7C3D1F",
+    })).toBe("0D4E7C3D1F");
+    expect(formatPaymentReference({
+      id: "55555555-5555-4555-8555-555555555555",
+      reference: "MPESA-4422",
+    })).toBe("MPESA-4422");
+  });
+
+  it("generates a payment PDF with the payment reference and exact transaction amount", async () => {
+    const pdf = await createPaymentReceiptPdf({
+      id: "55555555-5555-4555-8555-555555555555",
+      payment_date: "2026-03-10",
+      amount_kes: "180.25",
+      reference: "0D4E7C3D1F",
+      created_at: "2026-03-10T10:15:30Z",
+    }, {
+      farmName: "Test Farm",
+      batchCode: "TEST-BATCH-01",
+      sale,
+    });
+    const output = pdf.output();
+
+    expect(output.startsWith("%PDF-")).toBe(true);
+    expect(output).toContain("Reference: 0D4E7C3D1F");
+    expect(output).toContain("180.25");
+    expect(output).toContain("13:15:30 EAT");
+    expect(output).toContain("Test buyer");
+  });
+
+  it("opens a print-ready PDF in the supplied print window", async () => {
+    const replace = vi.fn();
+    const target: ReceiptPrintTarget = { location: { replace } };
+
+    await printSaleReceiptPdf(sale, "Test Farm", "TEST-BATCH-01", "Broiler", target);
+
+    expect(replace).toHaveBeenCalledOnce();
+    expect(replace.mock.calls[0][0]).toMatch(/^blob:/);
   });
 });

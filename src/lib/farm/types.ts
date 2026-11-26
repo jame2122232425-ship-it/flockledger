@@ -19,6 +19,31 @@ export type Batch = {
   age_days: number;
 };
 
+export type BatchDetail = Batch & {
+  id: string;
+  farm_id: string;
+  rearing_system: string | null;
+  source: string | null;
+  strain: string | null;
+  chicks_ordered: number;
+  date_sold_out: string | null;
+  remarks: string | null;
+  live_weight_sold_kg: number;
+  avg_live_weight_sold_kg: number | null;
+  total_cost_kes: number;
+  cost_per_bird_sold_kes: number | null;
+  cost_per_kg_sold_kes: number | null;
+  profit_kes: number;
+  profit_per_bird_sold_kes: number | null;
+  livability_percent: number;
+  epef: number | null;
+  cash_in_kes: number;
+  cash_out_kes: number;
+  paid_kes: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type DailyRecord = {
   id: string;
   batch_id: string;

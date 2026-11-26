@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Icon } from "@/components/app-icon";
 import { PaginationControls } from "@/components/pagination-controls";
 import { request } from "@/lib/client/request";
-import { formatNumber, shortDate } from "@/lib/format";
+import { formatKes, formatNumber, shortDate } from "@/lib/format";
 import type { PageMetadata } from "@/lib/api/pagination";
 import type {
   Batch,
+  BatchDetail,
   DailyRecord,
   DashboardPayload,
 } from "@/lib/farm/types";
@@ -37,6 +39,58 @@ function EmptyState({
   );
 }
 
+function RecordDetailPage({
+  eyebrow,
+  title,
+  subtitle,
+  onBack,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  onBack: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <div className="page-heading record-detail-heading">
+        <div>
+          <p className="eyebrow">{eyebrow}</p>
+          <h1>{title}</h1>
+          <p className="page-subtitle">{subtitle}</p>
+        </div>
+        <button className="button button-quiet" type="button" onClick={onBack}>Back to list</button>
+      </div>
+      <section className="content-card record-detail-card">{children}</section>
+    </>
+  );
+}
+
+function DetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="record-detail-section">
+      <h2>{title}</h2>
+      <dl className="record-detail-grid">{children}</dl>
+    </section>
+  );
+}
+
+function DetailField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>{value || "—"}</dd>
+    </div>
+  );
+}
+
 export function BatchesPage({
   farmId,
   initialDashboard,
@@ -52,6 +106,12 @@ export function BatchesPage({
 }) {
   const [filter, setFilter] = useState<"all" | "running" | "closed">("all");
   const [page, setPage] = useState(1);
+  const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
+  const [batchDetail, setBatchDetail] = useState<{
+    batchId: string;
+    data?: BatchDetail;
+    error?: string;
+  } | null>(null);
   const [loaded, setLoaded] = useState<{ key: string; data: DashboardPayload } | null>(null);
   const [loadError, setLoadError] = useState<{ key: string; message: string } | null>(null);
   const pageKey = `${filter}:${page}`;
@@ -92,9 +152,81 @@ export function BatchesPage({
     };
   }, [farmId, filter, initialDashboard, loading, page, pageKey]);
 
+  useEffect(() => {
+    if (!selectedBatch) return;
+    let active = true;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ farmId });
+    request<{ data: BatchDetail }>(
+      `/api/batches/${encodeURIComponent(selectedBatch.batch_id)}?${params.toString()}`,
+      { signal: controller.signal },
+    ).then((result) => {
+      if (active) setBatchDetail({ batchId: selectedBatch.batch_id, data: result.data });
+    }).catch((loadError: unknown) => {
+      if (active) {
+        setBatchDetail({
+          batchId: selectedBatch.batch_id,
+          error: loadError instanceof Error ? loadError.message : "Could not load batch details.",
+        });
+      }
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [farmId, selectedBatch]);
+
   function selectFilter(nextFilter: "all" | "running" | "closed") {
     setPage(1);
     setFilter(nextFilter);
+  }
+
+  if (selectedBatch) {
+    const details = batchDetail?.batchId === selectedBatch.batch_id ? batchDetail.data : undefined;
+    const detailError = batchDetail?.batchId === selectedBatch.batch_id ? batchDetail.error : undefined;
+    return (
+      <RecordDetailPage
+        eyebrow="FLOCK MANAGEMENT"
+        title={selectedBatch.batch_code}
+        subtitle={`${selectedBatch.batch_type}${selectedBatch.house ? ` · ${selectedBatch.house}` : ""}`}
+        onBack={() => setSelectedBatch(null)}
+      >
+        {detailError && <div className="notice error-notice" role="alert">{detailError}</div>}
+        {!details && !detailError && <div className="empty-inline" role="status">Loading batch details…</div>}
+        <DetailSection title="Batch information">
+          <DetailField label="Status" value={(details ?? selectedBatch).status === "running" ? "Active" : "Closed"} />
+          <DetailField label="Date placed" value={shortDate((details ?? selectedBatch).date_placed)} />
+          <DetailField label="Date closed" value={details?.date_sold_out ? shortDate(details.date_sold_out) : "—"} />
+          <DetailField label="House" value={details?.house ?? selectedBatch.house ?? "—"} />
+          <DetailField label="Rearing system" value={details?.rearing_system ?? "—"} />
+          <DetailField label="Source" value={details?.source ?? "—"} />
+          <DetailField label="Strain" value={details?.strain ?? "—"} />
+          <DetailField label="Chicks ordered" value={details ? formatNumber(details.chicks_ordered) : "—"} />
+          <DetailField label="Birds placed" value={formatNumber((details ?? selectedBatch).chicks_received)} />
+          <DetailField label="Age" value={(details ?? selectedBatch).status === "running" ? `Day ${formatNumber((details ?? selectedBatch).age_days)}` : "Closed"} />
+          <DetailField label="Notes" value={details?.remarks ?? "—"} />
+        </DetailSection>
+        <DetailSection title="Flock performance">
+          <DetailField label="Deaths" value={formatNumber((details ?? selectedBatch).dead)} />
+          <DetailField label="Culls" value={formatNumber((details ?? selectedBatch).culled)} />
+          <DetailField label="Mortality" value={`${formatNumber((details ?? selectedBatch).mortality_percent, 1)}%`} />
+          <DetailField label="Livability" value={details ? `${formatNumber(details.livability_percent, 1)}%` : "—"} />
+          <DetailField label="Birds sold" value={formatNumber((details ?? selectedBatch).birds_sold)} />
+          <DetailField label="Live weight sold" value={details ? `${formatNumber(details.live_weight_sold_kg, 2)} kg` : "—"} />
+          <DetailField label="Average sold weight" value={details?.avg_live_weight_sold_kg == null ? "—" : `${formatNumber(details.avg_live_weight_sold_kg, 2)} kg`} />
+          <DetailField label="Feed consumed" value={`${formatNumber((details ?? selectedBatch).feed_consumed_kg, 2)} kg`} />
+          <DetailField label="Feed conversion ratio" value={(details ?? selectedBatch).fcr == null ? "—" : formatNumber((details ?? selectedBatch).fcr, 2)} />
+          <DetailField label="EPEF" value={details?.epef == null ? "—" : formatNumber(details.epef, 1)} />
+        </DetailSection>
+        <DetailSection title="Revenue">
+          <DetailField label="Sales" value={formatKes((details ?? selectedBatch).revenue_kes)} />
+          <DetailField label="Payments received" value={details ? formatKes(details.paid_kes) : "—"} />
+          <DetailField label="Outstanding" value={formatKes((details ?? selectedBatch).outstanding_kes)} />
+          <DetailField label="Total costs" value={details ? formatKes(details.total_cost_kes) : "—"} />
+          <DetailField label="Profit" value={details ? formatKes(details.profit_kes) : "—"} />
+        </DetailSection>
+      </RecordDetailPage>
+    );
   }
 
   return (
@@ -135,7 +267,7 @@ export function BatchesPage({
                 <thead>
                   <tr>
                     <th>Batch</th><th>Status</th><th>Placed</th><th>Birds placed</th>
-                    <th>Age</th><th>Mortality</th><th>FCR</th>
+                    <th>Age</th><th>Mortality</th><th>FCR</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -158,6 +290,7 @@ export function BatchesPage({
                       <td>{batch.status === "running" ? `Day ${formatNumber(batch.age_days)}` : "—"}</td>
                       <td>{formatNumber(batch.mortality_percent, 1)}%</td>
                       <td>{batch.fcr == null ? "—" : formatNumber(batch.fcr, 2)}</td>
+                      <td><button className="revenue-action-link" type="button" onClick={() => { setBatchDetail(null); setSelectedBatch(batch); }}>Details</button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -192,6 +325,7 @@ export function DailyPage({
   onAdd: () => void;
 }) {
   const [page, setPage] = useState(1);
+  const [selectedRecord, setSelectedRecord] = useState<DailyRecord | null>(null);
   const [loadedPage, setLoadedPage] = useState<{
     key: string;
     records: DailyRecord[];
@@ -238,6 +372,37 @@ export function DailyPage({
     };
   }, [farmId, page, pageKey, refreshVersion]);
 
+  if (selectedRecord) {
+    return (
+      <RecordDetailPage
+        eyebrow="DAILY FARM ROUTINE"
+        title="Daily record"
+        subtitle={`${shortDate(selectedRecord.record_date)} · ${batchNames.get(selectedRecord.batch_id) ?? "Batch"}`}
+        onBack={() => setSelectedRecord(null)}
+      >
+        <DetailSection title="Flock activity">
+          <DetailField label="Date" value={shortDate(selectedRecord.record_date)} />
+          <DetailField label="Batch" value={batchNames.get(selectedRecord.batch_id) ?? "—"} />
+          <DetailField label="Deaths" value={formatNumber(selectedRecord.dead)} />
+          <DetailField label="Culls" value={formatNumber(selectedRecord.culled)} />
+          <DetailField label="Recorded by" value={selectedRecord.initials ?? "—"} />
+        </DetailSection>
+        <DetailSection title="Feed and water">
+          <DetailField label="Feed given" value={`${formatNumber(selectedRecord.feed_given_kg, 2)} kg`} />
+          <DetailField label="Feed left" value={`${formatNumber(selectedRecord.feed_left_kg, 2)} kg`} />
+          <DetailField label="Feed used" value={`${formatNumber(selectedRecord.feed_given_kg - selectedRecord.feed_left_kg, 2)} kg`} />
+          <DetailField label="Water" value={`${formatNumber(selectedRecord.water_liters, 1)} L`} />
+        </DetailSection>
+        <DetailSection title="House conditions and notes">
+          <DetailField label="Minimum temperature" value={selectedRecord.temp_min_c === null ? "—" : `${formatNumber(selectedRecord.temp_min_c, 1)} °C`} />
+          <DetailField label="Maximum temperature" value={selectedRecord.temp_max_c === null ? "—" : `${formatNumber(selectedRecord.temp_max_c, 1)} °C`} />
+          <DetailField label="Litter" value={selectedRecord.litter ?? "—"} />
+          <DetailField label="Remarks" value={selectedRecord.remarks ?? "—"} />
+        </DetailSection>
+      </RecordDetailPage>
+    );
+  }
+
   return (
     <>
       <div className="page-heading">
@@ -264,7 +429,7 @@ export function DailyPage({
             <div className="table-scroll">
               <table>
                 <thead>
-                  <tr><th>Date</th><th>Batch</th><th>Feed used</th><th>Water</th><th>Deaths</th><th>Culls</th><th>Initials</th></tr>
+                  <tr><th>Date</th><th>Batch</th><th>Feed used</th><th>Water</th><th>Deaths</th><th>Culls</th><th>Initials</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                   {records.map((record) => (
@@ -276,6 +441,7 @@ export function DailyPage({
                       <td>{formatNumber(record.dead)}</td>
                       <td>{formatNumber(record.culled)}</td>
                       <td>{record.initials || "—"}</td>
+                      <td><button className="revenue-action-link" type="button" onClick={() => setSelectedRecord(record)}>Details</button></td>
                     </tr>
                   ))}
                 </tbody>

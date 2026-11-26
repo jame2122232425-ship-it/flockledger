@@ -4,7 +4,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState, useS
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { generateBatchCode } from "@/lib/batches/batch-code";
+import { generateBatchCode, generateBatchCodeSuffix } from "@/lib/batches/batch-code";
 import { dailyRecordCreateSchema } from "@/lib/validation/daily-records";
 import { Icon } from "@/components/app-icon";
 import { Metric } from "@/components/metric-card";
@@ -234,6 +234,7 @@ export default function FlockLedgerApp({
   const [batchType, setBatchType] = useState<"Broiler" | "Kienyeji">("Broiler");
   const [batchDatePlaced, setBatchDatePlaced] = useState("");
   const [batchHouse, setBatchHouse] = useState("");
+  const [batchCodeSuffix, setBatchCodeSuffix] = useState("");
   const tab = useSyncExternalStore(
     subscribeToTabChanges,
     getTabFromLocation,
@@ -287,16 +288,8 @@ export default function FlockLedgerApp({
 
   const activeFarm = farms.find((farm) => farm.id === farmId) ?? null;
   const generatedBatchCode = useMemo(
-    () => activeFarm
-      ? generateBatchCode(
-          activeFarm.name,
-          batchType,
-          batchDatePlaced,
-          batchHouse,
-          farmBatches.map((batch) => batch.batch_code),
-        )
-      : "",
-    [activeFarm, batchDatePlaced, batchHouse, batchType, farmBatches],
+    () => generateBatchCode(batchDatePlaced, batchCodeSuffix),
+    [batchCodeSuffix, batchDatePlaced],
   );
   const batches = useMemo(() => dashboard?.data ?? [], [dashboard]);
   const runningBatches = farmBatches.filter((batch) => batch.status === "running");
@@ -370,6 +363,7 @@ export default function FlockLedgerApp({
       setBatchType("Broiler");
       setBatchDatePlaced(todayInNairobi());
       setBatchHouse("");
+      setBatchCodeSuffix(generateBatchCodeSuffix());
     }
     setDialog(nextDialog);
   }
@@ -722,8 +716,9 @@ export default function FlockLedgerApp({
       await refreshDashboard(activeFarm.id);
     } catch (error) {
       if (error instanceof RequestError && error.status === 409) {
+        setBatchCodeSuffix(generateBatchCodeSuffix());
         await refreshDashboard(activeFarm.id);
-        setDialogError(`${error.message} The batch list was refreshed; submit again with the updated ID.`);
+        setDialogError(`${error.message} A new batch ID was generated; submit again.`);
       } else {
         setDialogError(error instanceof Error ? error.message : "Could not create batch.");
       }
@@ -995,15 +990,18 @@ export default function FlockLedgerApp({
               onAddDaily={() => openDialog("daily")}
             />
           ) : tab === "batches" ? (
-            <BatchesPage farmId={farmId} initialDashboard={dashboard} loading={loadingDashboard} canCreate={canCreateBatches} onAdd={() => openDialog("batch")} />
+            <BatchesPage key={farmId} farmId={farmId} initialDashboard={dashboard} loading={loadingDashboard} canCreate={canCreateBatches} onAdd={() => openDialog("batch")} />
           ) : tab === "daily" ? (
-            <DailyPage farmId={farmId} batchNames={batchNames} refreshVersion={dailyRefreshVersion} onAdd={() => openDialog("daily")} />
+            <DailyPage key={farmId} farmId={farmId} batchNames={batchNames} refreshVersion={dailyRefreshVersion} onAdd={() => openDialog("daily")} />
           ) : tab === "revenue" ? (
             <RevenuePage
+              key={activeFarm.id}
               farmId={activeFarm.id}
+              farmName={activeFarm.name}
               batches={farmBatches}
               loadingBatches={loadingDashboard}
               canRecord={activeFarm.role === "owner" || activeFarm.role === "manager" || activeFarm.role === "accountant"}
+              canDownloadReceipts={canEditRecords}
               onFeedback={setFeedback}
             />
           ) : (
