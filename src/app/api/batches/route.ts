@@ -89,29 +89,47 @@ export async function POST(request: NextRequest) {
     if (authError || !user) return apiError("Authentication required.", 401);
 
     const batch = parsedBody.data;
-    const { data, error } = await supabase
-      .from("batches")
-      .insert({
-        farm_id: batch.farmId,
-        batch_code: batch.batchCode,
-        batch_type: batch.batchType,
-        rearing_system: batch.rearingSystem ?? null,
-        house: batch.house ?? null,
-        date_placed: batch.datePlaced,
-        source: batch.source ?? null,
-        strain: batch.strain ?? null,
-        chicks_ordered: batch.chicksOrdered,
-        chicks_received: batch.chicksReceived,
-        remarks: batch.remarks ?? null,
-      })
-      .select(BATCH_FIELDS)
-      .single();
+    const { data, error } = await supabase.rpc("create_batch_with_quota", {
+      p_farm_id: batch.farmId,
+      p_batch_code: batch.batchCode,
+      p_batch_type: batch.batchType,
+      p_rearing_system: batch.rearingSystem ?? null,
+      p_house: batch.house ?? null,
+      p_date_placed: batch.datePlaced,
+      p_source: batch.source ?? null,
+      p_strain: batch.strain ?? null,
+      p_chicks_ordered: batch.chicksOrdered,
+      p_chicks_received: batch.chicksReceived,
+      p_remarks: batch.remarks ?? null,
+    });
 
     if (error) {
+      if (error.message === "ACTIVE_BATCH_QUOTA_EXCEEDED") {
+        return NextResponse.json(
+          {
+            error: "The active batch limit for this farm has been reached. Close a running batch or change plans before adding another.",
+            code: "QUOTA_EXCEEDED",
+          },
+          { status: 409 },
+        );
+      }
       if (error.code === "23505") {
         return apiError("That batch ID is already in use for this farm.", 409);
       }
-      if (error.code === "42501") return apiError("You cannot create batches for this farm.", 403);
+      if (error.code === "42501") {
+        console.error("Batch creation authorization denied:", error.message);
+        if (error.message === "You cannot create batches for this farm.") {
+          return apiError(
+            "The selected farm does not recognize this account as an owner or manager. Ask a farm owner to verify your role, then sign out and back in.",
+            403,
+          );
+        }
+        return apiError(
+          "The database could not verify access to this farm. Sign out and back in, then contact support if the problem continues.",
+          403,
+        );
+      }
+      if (error.code === "55000") return apiError("The active batch limit is unavailable. Contact support.", 503);
       console.error("Failed to create batch:", error.code);
       return apiError("Could not create batch.", 500);
     }

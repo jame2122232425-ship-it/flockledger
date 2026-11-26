@@ -20,17 +20,19 @@ function EmptyState({
 }: {
   title: string;
   detail: string;
-  action: string;
-  onClick: () => void;
+  action?: string;
+  onClick?: () => void;
 }) {
   return (
     <div className="empty-state">
       <span className="empty-illustration"><Icon name="bird" /></span>
       <strong>{title}</strong>
       <p>{detail}</p>
-      <button className="text-button" type="button" onClick={onClick}>
-        {action} <span aria-hidden="true">→</span>
-      </button>
+      {action && onClick && (
+        <button className="text-button" type="button" onClick={onClick}>
+          {action} <span aria-hidden="true">→</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -39,11 +41,13 @@ export function BatchesPage({
   farmId,
   initialDashboard,
   loading,
+  canCreate,
   onAdd,
 }: {
   farmId: string;
   initialDashboard: DashboardPayload | null;
   loading: boolean;
+  canCreate: boolean;
   onAdd: () => void;
 }) {
   const [filter, setFilter] = useState<"all" | "running" | "closed">("all");
@@ -101,7 +105,7 @@ export function BatchesPage({
           <h1>Your batches</h1>
           <p className="page-subtitle">Follow every flock from placement through closeout.</p>
         </div>
-        <button className="button button-primary" type="button" onClick={onAdd}>New batch</button>
+        {canCreate && <button className="button button-primary" type="button" onClick={onAdd}>New batch</button>}
       </div>
       <section className="content-card table-card">
         <div className="table-toolbar">
@@ -164,9 +168,11 @@ export function BatchesPage({
         ) : (
           <EmptyState
             title={filter === "all" ? "No batches recorded" : `No ${filter} batches`}
-            detail="Create a batch record to begin tracking flock performance."
-            action="Create a batch"
-            onClick={onAdd}
+            detail={canCreate
+              ? "Create a batch record to begin tracking flock performance."
+              : "Only farm owners and managers can create batches. Ask an owner to help you get started."}
+            action={canCreate ? "Create a batch" : undefined}
+            onClick={canCreate ? onAdd : undefined}
           />
         )}
       </section>

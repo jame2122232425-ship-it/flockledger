@@ -4,7 +4,12 @@ import { apiError, isUuid } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createHash, randomBytes } from "node:crypto";
-import { attemptKey, getClientIp } from "@/lib/security";
+import {
+  attemptKey,
+  getClientIp,
+  payloadHash,
+  requireIdempotencyKey,
+} from "@/lib/security";
 import {
   paginationMetadata,
   paginationRange,
@@ -18,7 +23,54 @@ const invitationSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+const reservationSchema = z.object({
+  reservationId: z.string().uuid(),
+  status: z.enum(["reserved", "provisioned", "consumed", "released"]),
+  expiresAt: z.string(),
+  reused: z.boolean(),
+});
+
 type RouteContext = { params: Promise<{ farmId: string }> };
+
+async function compensateStaffProvisioning(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  reservationId: string,
+  authUserId?: string,
+) {
+  let compensationFailed = false;
+  if (authUserId) {
+    try {
+      const { error } = await admin.auth.admin.deleteUser(authUserId);
+      if (error) {
+        compensationFailed = true;
+        console.error("Failed to delete partially provisioned Auth user:", {
+          status: error.status,
+          reservationId,
+        });
+      }
+    } catch {
+      compensationFailed = true;
+      console.error("Could not reach Auth to delete a partially provisioned user:", { reservationId });
+    }
+  }
+
+  try {
+    const { error } = await admin.rpc("release_farm_staff_seat_reservation", {
+      p_reservation_id: reservationId,
+    });
+    if (error) {
+      compensationFailed = true;
+      console.error("Failed to release a staff seat reservation:", {
+        code: error.code,
+        reservationId,
+      });
+    }
+  } catch {
+    compensationFailed = true;
+    console.error("Could not reach the database to release a staff seat reservation:", { reservationId });
+  }
+  return !compensationFailed;
+}
 
 export async function GET(request: NextRequest, context: RouteContext) {
   const pagination = parsePagination(request.nextUrl.searchParams);
@@ -57,6 +109,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
 export async function POST(request: NextRequest, context: RouteContext) {
   const { farmId } = await context.params;
   if (!isUuid(farmId)) return apiError("Invalid farm ID.", 400);
+  const idempotencyKey = requireIdempotencyKey(request);
+  if (!idempotencyKey) return apiError("Provide an Idempotency-Key header.", 400);
   let body: unknown;
   try {
     body = await request.json();
@@ -91,77 +145,173 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const admin = createSupabaseAdminClient();
     const tempPassword = parsed.data.password;
-    const { data: createdUser, error: createError } = await admin.auth.admin.createUser({
-      email: parsed.data.email,
-      password: tempPassword,
-      email_confirm: true,
-      user_metadata: {
-        full_name: parsed.data.fullName ?? "",
-        force_password_change: true,
+    const { data: reservationData, error: reservationError } = await supabase.rpc(
+      "reserve_farm_staff_seat",
+      {
+        p_farm_id: farmId,
+        p_email: parsed.data.email,
+        p_role: parsed.data.role,
+        p_full_name: parsed.data.fullName ?? null,
+        p_idempotency_key_hash: createHash("sha256").update(idempotencyKey).digest("hex"),
+        p_payload_hash: payloadHash({
+          email: parsed.data.email,
+          role: parsed.data.role,
+          fullName: parsed.data.fullName ?? null,
+        }),
       },
-      app_metadata: {
-        force_password_change: true,
-      },
-    });
-    if (createError) {
-      if (createError.status === 422) return apiError("Could not create the staff account.", 409);
-      console.error("Failed to create staff auth account:", createError.status);
-      return apiError("Could not create staff account.", 500);
+    );
+    if (reservationError) {
+      if (reservationError.message === "STAFF_SEAT_QUOTA_EXCEEDED") {
+        return NextResponse.json(
+          {
+            error: "The additional staff limit for this farm has been reached. Remove a staff member or change plans before inviting another.",
+            code: "QUOTA_EXCEEDED",
+          },
+          { status: 409 },
+        );
+      }
+      if (reservationError.code === "42501") {
+        return apiError("Only farm owners can reserve staff seats.", 403);
+      }
+      if (reservationError.code === "55000") {
+        return apiError("The additional staff limit is unavailable. Contact support.", 503);
+      }
+      if (reservationError.code === "23505") {
+        return apiError("A staff seat for this email is already reserved or requires reconciliation.", 409);
+      }
+      if (reservationError.code === "P0001") {
+        return apiError(reservationError.message, 409);
+      }
+      console.error("Failed to reserve a staff seat:", reservationError.code);
+      return apiError("Could not reserve a staff seat.", 500);
     }
-    if (!createdUser.user) return apiError("Could not create staff account.", 500);
+
+    const parsedReservation = reservationSchema.safeParse(reservationData);
+    if (!parsedReservation.success) {
+      console.error("Staff seat reservation returned an invalid response.");
+      return apiError("Could not reserve a staff seat.", 500);
+    }
+    const reservation = parsedReservation.data;
+    if (reservation.reused && reservation.status === "released") {
+      return apiError("The previous provisioning attempt was rolled back. Submit again to retry.", 409);
+    }
+    if (reservation.reused || reservation.status !== "reserved") {
+      return apiError("This invitation request has already been processed or is still in progress.", 409);
+    }
+
+    let createdUser: Awaited<ReturnType<typeof admin.auth.admin.createUser>>;
+    try {
+      createdUser = await admin.auth.admin.createUser({
+        email: parsed.data.email,
+        password: tempPassword,
+        email_confirm: true,
+        user_metadata: {
+          full_name: parsed.data.fullName ?? "",
+          force_password_change: true,
+          staff_reservation_id: reservation.reservationId,
+        },
+        app_metadata: {
+          force_password_change: true,
+          staff_reservation_id: reservation.reservationId,
+        },
+      });
+    } catch {
+      console.error("Staff Auth provisioning outcome is unknown; reservation retained for reconciliation:", {
+        reservationId: reservation.reservationId,
+      });
+      return apiError(`Staff provisioning did not complete. Contact support with reservation ${reservation.reservationId}.`, 503);
+    }
+    const { error: createError } = createdUser;
+    const createdAuthUser = createdUser.data.user;
+    if (createError) {
+      if (createError.status === 422) {
+        const compensated = await compensateStaffProvisioning(admin, reservation.reservationId);
+        if (!compensated) {
+          return apiError(`Could not create the staff account. Contact support with reservation ${reservation.reservationId}.`, 500);
+        }
+        return apiError("An Auth account already uses this email address.", 409);
+      }
+      console.error("Failed to create staff Auth account; reservation left to expire for reconciliation:", {
+        status: createError.status,
+        reservationId: reservation.reservationId,
+      });
+      return apiError(`Staff provisioning did not complete. Contact support with reservation ${reservation.reservationId}.`, 503);
+    }
+    if (!createdAuthUser) {
+      const compensated = await compensateStaffProvisioning(admin, reservation.reservationId);
+      return apiError(
+        !compensated
+          ? `Could not create the staff account. Contact support with reservation ${reservation.reservationId}.`
+          : "Could not create the staff account.",
+        !compensated ? 500 : 503,
+      );
+    }
 
     const setupToken = randomBytes(32).toString("base64url");
     const setupTokenHash = createHash("sha256").update(setupToken).digest("hex");
 
-    const { error: membershipError } = await admin
-      .from("farm_memberships")
-      .insert({
-        farm_id: farmId,
-        user_id: createdUser.user.id,
-        role: parsed.data.role,
-      })
-      .select("farm_id, user_id, role, created_at")
-      .single();
-    if (membershipError) {
-      await admin.auth.admin.deleteUser(createdUser.user.id);
-      console.error("Failed to assign staff role:", membershipError.code);
-      return apiError("Could not assign the staff role.", 500);
-    }
-
     const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").trim().replace(/\/$/, "");
     const setupUrl = `${appUrl}/staff/setup?token_hash=${encodeURIComponent(setupToken)}&email=${encodeURIComponent(parsed.data.email)}`;
-    const { data, error } = await admin
-      .from("farm_invitations")
-      .upsert(
-        {
-          farm_id: farmId,
-          email: parsed.data.email,
-          role: parsed.data.role,
-          invited_by: user.id,
-          full_name: parsed.data.fullName ?? null,
-          setup_token_hash: setupTokenHash,
-          setup_expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-          status: "pending",
-          accepted_at: null,
-        },
-        { onConflict: "farm_id,email" },
-      )
-      .select("id, email, role, status, created_at")
-      .single();
+    let finalization: Awaited<ReturnType<typeof admin.rpc>>;
+    try {
+      finalization = await admin.rpc("finalize_farm_staff_invitation", {
+        p_reservation_id: reservation.reservationId,
+        p_auth_user_id: createdAuthUser.id,
+        p_setup_token_hash: setupTokenHash,
+      });
+    } catch {
+      const compensated = await compensateStaffProvisioning(
+        admin,
+        reservation.reservationId,
+        createdAuthUser.id,
+      );
+      if (!compensated) {
+        return apiError(`Staff provisioning failed and requires reconciliation. Contact support with reservation ${reservation.reservationId}.`, 500);
+      }
+      console.error("Staff invitation finalization request failed:", {
+        reservationId: reservation.reservationId,
+      });
+      return apiError("Could not create invitation.", 500);
+    }
+    const { data, error } = finalization;
     if (error) {
+      const compensated = await compensateStaffProvisioning(
+        admin,
+        reservation.reservationId,
+        createdAuthUser.id,
+      );
+      if (!compensated) {
+        return apiError(`Staff provisioning failed and requires reconciliation. Contact support with reservation ${reservation.reservationId}.`, 500);
+      }
+      console.error("Failed to finalize staff invitation:", {
+        code: error.code,
+        reservationId: reservation.reservationId,
+      });
       if (error.code === "42501") return apiError("Only farm owners can invite staff.", 403);
-      await admin
-        .from("farm_memberships")
-        .delete()
-        .eq("farm_id", farmId)
-        .eq("user_id", createdUser.user.id);
-      await admin.auth.admin.deleteUser(createdUser.user.id);
-      console.error("Failed to create invitation:", error.code);
+      return apiError("Could not create invitation.", 500);
+    }
+    const invitation = z.object({
+      id: z.string().uuid(),
+      email: z.string(),
+      role: z.string(),
+      status: z.string(),
+      created_at: z.string(),
+    }).safeParse(data);
+    if (!invitation.success) {
+      const compensated = await compensateStaffProvisioning(
+        admin,
+        reservation.reservationId,
+        createdAuthUser.id,
+      );
+      if (!compensated) {
+        return apiError(`Staff provisioning failed and requires reconciliation. Contact support with reservation ${reservation.reservationId}.`, 500);
+      }
+      console.error("Staff invitation finalization returned an invalid response.");
       return apiError("Could not create invitation.", 500);
     }
     return NextResponse.json({
       data: {
-        ...data,
+        ...invitation.data,
         setupUrl,
         temporaryPassword: tempPassword,
       },

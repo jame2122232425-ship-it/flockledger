@@ -1203,15 +1203,12 @@ This completes the Phase 3 implementation tranche, but it is not a production lo
 
 ### Quota enforcement assessment
 
-- `POST /api/batches` in `src/app/api/batches/route.ts` directly inserts a batch after authentication and relies on role/RLS. It does not read subscription limits or reserve quota in a transaction.
-- `POST /api/farms/[farmId]/invitations` in `src/app/api/farms/[farmId]/invitations/route.ts` creates an Auth user, membership, and invitation with separate administrative calls. It does not check the staff limit or atomically reserve a seat. Concurrent requests can exceed displayed limits, and partial provisioning spans multiple writes.
-- `evaluateSubscriptionLimit()` is not called by either operation. The Billing UI explicitly labels usage as informational; displayed limits are not enforcement.
-- Separate backend plan (not implemented in S2): move batch creation into an authenticated database RPC that locks/serializes per farm, counts active batches, checks the current entitlement and inserts atomically. For staff provisioning, add an owner-authorized atomic seat-reservation operation with a farm-scoped lock and idempotent reservation state; coordinate Auth user creation with explicit compensation/reconciliation for failures. Add concurrent SQL integration tests proving the configured caps cannot be exceeded.
+- At the time of the S2 review, `POST /api/batches` and staff provisioning were not quota-gated. This was subsequently addressed in S3; see the implementation and verification below.
 
 ### Remaining billing restrictions
 
 - Professional and Enterprise prices are still unset. There is no checkout, payment collection, payment-provider integration, or production billing.
-- Batch and additional-staff limits are informational until the separate atomic backend work above is completed.
+- Quota enforcement does not enable paid billing or change the configured plan prices.
 
 ## 27. Fresh Test Project Migration Deployment
 
@@ -1220,3 +1217,36 @@ This completes the Phase 3 implementation tranche, but it is not a production lo
 - Post-apply checks confirmed 13 migration records, 35 public tables with RLS enabled, three seeded subscription plans, and the expected farm/subscription RPCs. Auth users, farms, and memberships remained at zero.
 - The rollback-only `tests/subscription-foundation.sql` integration suite passed against this project. A synthetic Auth-user/profile-trigger probe also passed inside a rolled-back transaction. No test user or farm was retained.
 - This operation targeted the newly configured test project only. No production database was accessed or changed. The previous isolated project’s untracked migration-history caveat still applies to that separate project.
+
+## 28. S3 Atomic Subscription Quota Enforcement
+
+### Implementation
+
+- Batch creation now calls `create_batch_with_quota`, which checks the authenticated farm membership and role, obtains the farm-row lock, reads the current database entitlement, counts `status = 'running'` batches, and inserts the batch in one transaction. Competing creations for the same farm serialize; quota exhaustion is surfaced by the API as HTTP 409.
+- Staff provisioning reserves a farm-scoped seat before calling Supabase Auth. The database counts non-owner memberships, active reservations, and eligible legacy invitations without double-counting. Reservation creation/finalization/release are idempotent and farm-serialized. Membership is granted only after setup acceptance; direct authenticated membership writes are revoked and direct API membership creation is rejected.
+- Explicit Auth or finalization failures trigger account deletion/release compensation. Since Supabase Auth is external to PostgreSQL, an ambiguous network result cannot be made transactional; the expiring reservation reference is retained for follow-up reconciliation.
+- Owner role changes use the quota-aware `update_farm_member_role` RPC. Membership removal releases capacity and cancels accepted invitations, including historical accepted invitations without reservation IDs.
+- Entitlements remain database-backed: Starter has 2 active batches and 2 additional staff, Professional has 10 and 10, and Enterprise is configurable. Explicit `NULL` limits retain unbounded semantics. Missing or disabled quota configuration fails closed. Closing a running batch frees an active-batch slot.
+- Billing displays current usage, configured limits, and remaining capacity; it does not enforce limits client-side. Batch creation and staff provisioning APIs enforce them server-side.
+
+### Additive migrations and database target
+
+- Added `202611250001_s3_atomic_subscription_quotas.sql`, `202611250002_s3_staff_reservation_runtime_fix.sql`, and `202611250003_s3_member_removal_invitation_cleanup.sql`. Previously applied migrations were not edited.
+- The first two migrations were already applied to the user-confirmed isolated test Supabase project. Migration 3 was transactionally validated, then applied with version `202611250003` recorded in `supabase_migrations.schema_migrations`.
+- No production database or deployment was accessed. The latest rollback-only SQL suite includes a regression for deleting staff with a legacy accepted invitation lacking a reservation link.
+
+### Verification
+
+- `tests/subscription-quotas.sql` runs in a rollback transaction and covers plan limits, batch closure, downgrade overage, cross-farm denial, owner-excluded staff counts, pending/accepted/expired invitation behavior, setup acceptance, idempotent reservation/release, Auth-failure release, staff removal, legacy invitation cleanup, role-change quota protection, and anonymous denial.
+- `tests/subscription-quota-concurrency.ps1` used two independent PostgreSQL clients at each final available slot. Both actual runs produced exactly one accepted request and one quota rejection for batch creation, and one reservation plus one quota rejection for staff. The harness requires an explicit test-project confirmation and test database URL; do not point it at production.
+- `tests/quota-api.test.ts` covers clear quota conflicts, avoiding Auth creation when reservation fails, release on Auth failure, compensation on finalization failure, no membership before setup, and blocking direct member creation.
+- `npm test`: passed, 11 files and 54 tests.
+- `npx tsc --noEmit`: passed. `npm run lint`: passed. `git diff --check`: passed.
+- `npm run build`: passed; Next.js compiled, completed TypeScript, generated all 45 static pages/routes and finalized optimization with no development server running.
+- Both `tests/subscription-foundation.sql` and `tests/subscription-quotas.sql` passed and rolled back their fixtures. Final database checks found all three S3 migration records and zero S3 test farms, Auth users, batches, or reservations.
+
+### S3 status and remaining limitations
+
+- **Status: COMPLETE with a documented Auth reconciliation limitation.** Server/database quotas, expected application behavior, rollback SQL coverage, and concurrent boundary tests passed. No production deployment or production database changes were made.
+- Supabase Auth provisioning cannot share a PostgreSQL transaction. If an Auth response is lost or ambiguous, the route retains an expiring reservation reference; an operator must verify whether the Auth account exists, then either complete invitation finalization or remove the orphan Auth account and release the reservation. There is no automatic reconciliation job.
+- No payment provider, checkout, payment collection, production billing, or production deployment is part of S3. Paid prices remain unset.

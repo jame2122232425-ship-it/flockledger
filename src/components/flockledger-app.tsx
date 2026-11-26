@@ -222,6 +222,7 @@ export default function FlockLedgerApp({
   const [teamNotice, setTeamNotice] = useState("");
   const [teamSetupLink, setTeamSetupLink] = useState("");
   const [teamTemporaryPassword, setTeamTemporaryPassword] = useState("");
+  const invitationIdempotencyKey = useRef<string | null>(null);
   const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
   const [dailyRecords, setDailyRecords] = useState<DailyRecord[]>([]);
   const [dailyRefreshVersion, setDailyRefreshVersion] = useState(0);
@@ -309,6 +310,7 @@ export default function FlockLedgerApp({
   const dailyRecordLookupFailed = dailyRecordLookup?.key === dailyRecordLookupKey
     && Boolean(dailyRecordLookup.error);
   const canEditRecords = activeFarm?.role === "owner" || activeFarm?.role === "manager";
+  const canCreateBatches = canEditRecords;
   const batchNames = useMemo(() => new Map([
     ...batches.map((batch) => [batch.batch_id, batch.batch_code] as const),
     ...farmBatches.map((batch) => [batch.id, batch.batch_code] as const),
@@ -616,11 +618,14 @@ export default function FlockLedgerApp({
     setTeamTemporaryPassword("");
     const form = new FormData(event.currentTarget);
     setBusy(true);
+    const idempotencyKey = invitationIdempotencyKey.current ?? crypto.randomUUID();
+    invitationIdempotencyKey.current = idempotencyKey;
     try {
       const result = await request<{ data: { id: string; setupUrl?: string; temporaryPassword?: string } }>(
         `/api/farms/${encodeURIComponent(activeFarm.id)}/invitations`,
         {
           method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey },
           body: JSON.stringify({
             email: String(form.get("email") ?? ""),
             fullName: String(form.get("fullName") ?? "").trim() || undefined,
@@ -629,12 +634,21 @@ export default function FlockLedgerApp({
           }),
         },
       );
+      invitationIdempotencyKey.current = null;
       event.currentTarget.reset();
       setTeamSetupLink(result.data.setupUrl ?? "");
       setTeamTemporaryPassword(result.data.temporaryPassword ?? "");
       setTeamNotice("Staff account created. Send the setup link and temporary password securely.");
       await loadTeam();
     } catch (error) {
+      if (
+        error instanceof RequestError
+        && error.status > 0
+        && error.status < 500
+        && !error.message.includes("already been processed or is still in progress")
+      ) {
+        invitationIdempotencyKey.current = null;
+      }
       setTeamError(error instanceof Error ? error.message : "Could not create invitation.");
       setBusy(false);
     }
@@ -942,11 +956,11 @@ export default function FlockLedgerApp({
           <div className="breadcrumb"><span>Workspace</span><span className="crumb-separator">/</span><strong>{selectedTabTitle}</strong></div>
           <div className="topbar-actions">
             <span className="date-chip"><span className="status-dot" />{shortDate(todayInNairobi())}</span>
-            {tab !== "revenue" && tab !== "billing" && (
+            {tab === "daily" || (tab !== "revenue" && tab !== "billing" && canCreateBatches) ? (
               <button className="button button-primary topbar-add" type="button" disabled={!activeFarm} onClick={() => openDialog(tab === "daily" ? "daily" : "batch")}>
                 {tab === "daily" ? "Add daily record" : "New batch"}
               </button>
-            )}
+            ) : null}
           </div>
         </header>
 
@@ -982,7 +996,7 @@ export default function FlockLedgerApp({
               onAddDaily={() => openDialog("daily")}
             />
           ) : tab === "batches" ? (
-            <BatchesPage farmId={farmId} initialDashboard={dashboard} loading={loadingDashboard} onAdd={() => openDialog("batch")} />
+            <BatchesPage farmId={farmId} initialDashboard={dashboard} loading={loadingDashboard} canCreate={canCreateBatches} onAdd={() => openDialog("batch")} />
           ) : tab === "daily" ? (
             <DailyPage farmId={farmId} batchNames={batchNames} refreshVersion={dailyRefreshVersion} onAdd={() => openDialog("daily")} />
           ) : tab === "revenue" ? (
@@ -1041,7 +1055,11 @@ export default function FlockLedgerApp({
                     <p>This link expires after 7 days and becomes inactive after password setup.</p>
                   </section>
                 )}
-                <form className="form-stack team-invite-form" onSubmit={handleInviteMember}>
+                <form
+                  className="form-stack team-invite-form"
+                  onSubmit={handleInviteMember}
+                  onChange={() => { invitationIdempotencyKey.current = null; }}
+                >
                   <div className="team-invite-grid">
                     <label>
                       Full name

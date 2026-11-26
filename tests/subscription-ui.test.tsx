@@ -239,9 +239,28 @@ describe("farm billing UI", () => {
 
     expect(await screen.findByRole("heading", { name: "North Farm subscription" })).toBeTruthy();
     expect(screen.getByText("Active")).toBeTruthy();
-    expect(screen.getByText("1 of 10 batches")).toBeTruthy();
+    expect(screen.getByText("1 of 10 batches · 9 remaining")).toBeTruthy();
     expect(screen.getByText("Advanced analytics")).toBeTruthy();
     expect(screen.getByText("Owner billing access")).toBeTruthy();
+  });
+
+  it("shows unlimited limits and clamps remaining capacity to zero when over quota", async () => {
+    const entitlements = createEntitlements({
+      farmId: farmOneId,
+      planCode: "enterprise",
+      trialAvailable: false,
+    });
+    entitlements.limits.max_active_batches = 0;
+    entitlements.limits.max_staff_users = null;
+    setBillingResponses(entitlements, {
+      ...createUsage(farmOneId),
+      activeBatches: 1,
+      staffUsers: 3,
+    });
+    render(<FarmSubscriptionPage farmId={farmOneId} farmName="North Farm" farmRole="owner" />);
+
+    expect(await screen.findByText("1 of 0 batches · 0 remaining")).toBeTruthy();
+    expect(screen.getByText("3 people · unlimited")).toBeTruthy();
   });
 
   it("hides billing actions from staff and explains an already-used trial", async () => {

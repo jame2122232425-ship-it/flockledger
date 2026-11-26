@@ -63,11 +63,13 @@ function limitText(
   unit: string,
 ) {
   if (!Object.prototype.hasOwnProperty.call(entitlements.limits, key)) {
-    return `${usage} ${unit} · limit not configured`;
+    return `${usage} ${unit} · limit not configured · remaining capacity unavailable`;
   }
   const limit = entitlements.limits[key];
-  if (limit === null) return `${usage} ${unit} · no configured cap`;
-  return `${usage} of ${new Intl.NumberFormat("en-KE").format(limit)} ${unit}`;
+  if (limit === null) return `${usage} ${unit} · unlimited`;
+  const formattedLimit = new Intl.NumberFormat("en-KE").format(limit);
+  const remaining = Math.max(0, limit - usage);
+  return `${usage} of ${formattedLimit} ${unit} · ${remaining} remaining`;
 }
 
 function trialProgress(entitlements: FarmEntitlements) {

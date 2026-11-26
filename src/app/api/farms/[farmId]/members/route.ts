@@ -46,33 +46,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
   }
 }
 
-export async function POST(request: NextRequest, context: RouteContext) {
-  const { farmId } = await context.params;
-  if (!isUuid(farmId)) return apiError("Invalid farm ID.", 400);
-  let body: unknown;
-  try { body = await request.json(); } catch { return apiError("Request body must be valid JSON.", 400); }
-  const parsed = memberSchema.safeParse(body);
-  if (!parsed.success) return apiError("Provide a valid user ID and farm role.", 400);
-
-  try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) return apiError("Authentication required.", 401);
-    const { data, error } = await supabase.from("farm_memberships")
-      .insert({ farm_id: farmId, user_id: parsed.data.userId, role: parsed.data.role })
-      .select("farm_id, user_id, role, created_at").single();
-    if (error) {
-      if (error.code === "23505") return apiError("User is already a member of this farm.", 409);
-      if (error.code === "42501") return apiError("Only farm owners can add members.", 403);
-      console.error("Failed to add farm member:", error.code);
-      return apiError("Could not add farm member.", 500);
-    }
-    return NextResponse.json({ data }, { status: 201 });
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Supabase is not configured")) return apiError(error.message, 503);
-    console.error("Unexpected farm member creation error:", error);
-    return apiError("Could not add farm member.", 500);
-  }
+export async function POST() {
+  return apiError("Staff must complete an invitation setup before receiving farm access.", 409);
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
@@ -87,13 +62,19 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    const { data, error } = await supabase.from("farm_memberships")
-      .update({ role: parsed.data.role })
-      .eq("farm_id", farmId).eq("user_id", parsed.data.userId)
-      .select("farm_id, user_id, role, created_at").maybeSingle();
+    const { data, error } = await supabase.rpc("update_farm_member_role", {
+      p_farm_id: farmId,
+      p_user_id: parsed.data.userId,
+      p_role: parsed.data.role,
+    });
     if (error) {
       if (error.code === "42501") return apiError("Only farm owners can change member roles.", 403);
+      if (error.message === "STAFF_SEAT_QUOTA_EXCEEDED") {
+        return apiError("The additional staff limit for this farm has been reached. Remove a staff member or change plans before assigning this role.", 409);
+      }
+      if (error.code === "55000") return apiError("The additional staff limit is unavailable. Contact support.", 503);
       if (error.code === "P0001") return apiError(error.message, 409);
+      if (error.code === "P0002") return apiError("Farm member not found.", 404);
       console.error("Failed to update farm member:", error.code);
       return apiError("Could not update farm member.", 500);
     }

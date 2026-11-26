@@ -40,11 +40,20 @@ Supabase backup/PITR plan has not yet been confirmed.
 
 ## Auth, email, cookies, and headers
 
-- Supabase's default Auth email delivery is the selected initial option.
-  Configure confirmation and password-reset templates, redirect allowlists,
-  and abuse protection; verify the current provider limits and delivery
-  behavior before launch. Move to custom SMTP if the default service does not
-  meet production volume or deliverability needs.
+- Supabase's default Auth email delivery is only suitable for testing. With
+  **Confirm email** on, the built-in sender delivers only to email addresses
+  belonging to Supabase organization team members, and it allows only two
+  emails per hour across the whole project. Other addresses fail sign-up with
+  `email_address_not_authorized`; once the hourly cap is reached, sign-up fails
+  with `over_email_send_rate_limit`. For public sign-ups, configure custom SMTP
+  (or a Send Email hook) in Supabase and raise the email limit under
+  **Authentication > Rate Limits** before launch.
+- Configure confirmation and password-reset templates, set the Site URL to the
+  canonical `NEXT_PUBLIC_APP_URL`, register the sign-in/sign-up/callback
+  redirect URLs in the allowlist, and enable abuse protection. Without a
+  configured sender, `/api/auth/sign-up` returns a generic
+  "Could not create account." response; inspect the Vercel function logs for
+  `Supabase sign-up failed` to see the status, error code, and request ID.
 - Verify production sessions use HTTPS, secure cookies, suitable SameSite
   behavior, and reviewed session lifetimes.
 - Inspect deployed response headers and test the CSP against all required
