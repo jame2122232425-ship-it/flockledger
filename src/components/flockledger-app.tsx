@@ -381,7 +381,7 @@ export default function FlockLedgerApp({
   const dailyRecordLookupFailed = dailyRecordLookup?.key === dailyRecordLookupKey
     && Boolean(dailyRecordLookup.error);
   const farmIsActive = activeFarm?.lifecycle_status === "active";
-  const canViewAudit = ["owner", "manager", "accountant", "inventory_officer"].includes(activeFarm?.role ?? "");
+  const canViewAudit = activeFarm?.role === "owner";
   const canEditRecords = farmIsActive && (activeFarm?.role === "owner" || activeFarm?.role === "manager");
   const canCreateBatches = canEditRecords;
   const batchNames = useMemo(() => new Map([
@@ -1157,7 +1157,7 @@ export default function FlockLedgerApp({
           ) : tab === "audit" ? (
             canViewAudit
               ? <AuditPage key={activeFarm.id} farmId={activeFarm.id} role={activeFarm.role} />
-              : <section className="welcome-card"><h1>Audit access is restricted</h1><p>Your farm role does not include audit visibility.</p></section>
+              : <section className="welcome-card"><h1>Audit access is restricted</h1><p>Only the farm owner can view audit history.</p></section>
           ) : null}
         </div>
       </section>

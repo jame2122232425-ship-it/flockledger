@@ -823,97 +823,61 @@ begin
     rejected := true;
   end;
   perform pg_temp.assert_true(rejected, 'Farm A owner cannot read Farm B audit');
+
+  rejected := false;
+  begin
+    perform count(*) from public.audit_events;
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  perform pg_temp.assert_true(rejected, 'Farm audit table is not directly readable');
 end;
 $$;
 
 reset role;
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000003', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 set local role authenticated;
 
 do $$
 declare
-  result jsonb;
-  rejected boolean := false;
+  user_id uuid;
+  audit_category text;
+  rejected boolean;
 begin
-  select public.get_farm_audit_page(
-    '20000000-0000-4000-8000-000000000001', 'operational'
-  ) into result;
-  perform pg_temp.assert_true((result->>'total')::integer > 0, 'Manager can list operational audit');
-  perform pg_temp.assert_true(
-    not exists (
-      select 1
-      from jsonb_array_elements(result->'data') event
-      where event->'old_data' <> 'null'::jsonb or event->'new_data' <> 'null'::jsonb
-    ),
-    'Manager operational audit redacts before-and-after data'
-  );
+  foreach user_id in array array[
+    '10000000-0000-4000-8000-000000000003'::uuid,
+    '10000000-0000-4000-8000-000000000004'::uuid,
+    '10000000-0000-4000-8000-000000000005'::uuid,
+    '10000000-0000-4000-8000-000000000006'::uuid,
+    '10000000-0000-4000-8000-000000000007'::uuid
+  ] loop
+    perform set_config('request.jwt.claim.sub', user_id::text, true);
+    foreach audit_category in array array['all', 'operational', 'financial', 'inventory'] loop
+      rejected := false;
+      begin
+        perform public.get_farm_audit_page(
+          '20000000-0000-4000-8000-000000000001', audit_category
+        );
+      exception when insufficient_privilege then
+        rejected := true;
+      end;
+      perform pg_temp.assert_true(
+        rejected,
+        'Non-owner cannot list ' || audit_category || ' audit'
+      );
+    end loop;
 
-  select public.get_farm_audit_page(
-    '20000000-0000-4000-8000-000000000001', 'inventory'
-  ) into result;
-  perform pg_temp.assert_true((result->>'total')::integer > 0, 'Manager can list inventory audit');
-
-  begin
-    perform public.get_farm_audit_page(
-      '20000000-0000-4000-8000-000000000001', 'all'
-    );
-  exception when insufficient_privilege then
-    rejected := true;
-  end;
-  perform pg_temp.assert_true(rejected, 'Manager cannot request full farm audit');
-end;
-$$;
-
-reset role;
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000004', true);
-select set_config('request.jwt.claim.role', 'authenticated', true);
-set local role authenticated;
-
-do $$
-declare
-  result jsonb;
-  rejected boolean := false;
-begin
-  select public.get_farm_audit_page(
-    '20000000-0000-4000-8000-000000000001', 'financial'
-  ) into result;
-  perform pg_temp.assert_true((result->>'total')::integer > 0, 'Accountant can list financial audit');
-
-  begin
-    perform public.get_farm_audit_page(
-      '20000000-0000-4000-8000-000000000001', 'operational'
-    );
-  exception when insufficient_privilege then
-    rejected := true;
-  end;
-  perform pg_temp.assert_true(rejected, 'Accountant cannot view operational audit');
-end;
-$$;
-
-reset role;
-select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000007', true);
-select set_config('request.jwt.claim.role', 'authenticated', true);
-set local role authenticated;
-
-do $$
-declare
-  result jsonb;
-  rejected boolean := false;
-begin
-  select public.get_farm_audit_page(
-    '20000000-0000-4000-8000-000000000001', 'inventory'
-  ) into result;
-  perform pg_temp.assert_true((result->>'total')::integer > 0, 'Inventory officer can list inventory audit');
-
-  begin
-    perform public.get_farm_audit_page(
-      '20000000-0000-4000-8000-000000000001', 'financial'
-    );
-  exception when insufficient_privilege then
-    rejected := true;
-  end;
-  perform pg_temp.assert_true(rejected, 'Inventory officer cannot view financial audit');
+    rejected := false;
+    begin
+      perform public.get_farm_audit_page(
+        '20000000-0000-4000-8000-000000000001',
+        'all', null, null, 1000, 0, true, null
+      );
+    exception when insufficient_privilege then
+      rejected := true;
+    end;
+    perform pg_temp.assert_true(rejected, 'Non-owner cannot export farm audit');
+  end loop;
 end;
 $$;
 
@@ -955,7 +919,7 @@ begin
   end;
   perform pg_temp.assert_true(rejected, 'Audit access logs are append-only');
   perform pg_temp.assert_true(
-    (select count(*) >= 5 from public.audit_access_logs),
+    (select count(*) >= 2 from public.audit_access_logs),
     'Farm audit list and platform audit access are logged'
   );
 end;

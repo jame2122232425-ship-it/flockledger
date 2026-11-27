@@ -19,12 +19,7 @@ type AuditEvent = {
   occurred_at: string;
 };
 
-const categoriesByRole: Record<string, AuditCategory[]> = {
-  owner: ["all", "operational", "financial", "inventory"],
-  manager: ["operational", "inventory"],
-  accountant: ["financial"],
-  inventory_officer: ["inventory"],
-};
+const ownerAuditCategories: AuditCategory[] = ["all", "operational", "financial", "inventory"];
 const noAuditCategories: AuditCategory[] = [];
 const emptyPagination: PageMetadata = {
   page: 1,
@@ -46,11 +41,11 @@ function dateBound(value: string, endOfDay: boolean) {
 }
 
 function displayJson(value: unknown | null) {
-  return value == null ? "Not available for this role" : JSON.stringify(value, null, 2);
+  return value == null ? "No snapshot recorded" : JSON.stringify(value, null, 2);
 }
 
 export function AuditPage({ farmId, role }: { farmId: string; role: string }) {
-  const categories = categoriesByRole[role] ?? noAuditCategories;
+  const categories = role === "owner" ? ownerAuditCategories : noAuditCategories;
   const [selectedCategory, setSelectedCategory] = useState<AuditCategory>(categories[0] ?? "operational");
   const category = categories.includes(selectedCategory) ? selectedCategory : categories[0] ?? "operational";
   const [from, setFrom] = useState("");
@@ -65,6 +60,7 @@ export function AuditPage({ farmId, role }: { farmId: string; role: string }) {
   const [queryError, setQueryError] = useState<{ queryKey: string; message: string } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
   const fromBound = dateBound(from, false);
   const toBound = dateBound(to, true);
   const queryKey = `${farmId}:${category}:${fromBound}:${toBound}:${page}:${refreshKey}`;
@@ -139,13 +135,28 @@ export function AuditPage({ farmId, role }: { farmId: string; role: string }) {
     }
   };
 
+  if (role !== "owner") {
+    return (
+      <section className="audit-page">
+        <div className="content-card audit-restricted">
+          <h1>Audit access is restricted</h1>
+          <p>Only the farm owner can view audit history.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (selectedEvent) {
+    return <AuditEventDetail event={selectedEvent} onBack={() => setSelectedEvent(null)} />;
+  }
+
   return (
     <section className="audit-page">
       <div className="content-card audit-toolbar">
         <div>
           <p className="eyebrow">AUDIT TRAIL</p>
           <h1>Farm activity history</h1>
-          <p>Access is permission-scoped and each audit view or export is recorded.</p>
+          <p>Only the farm owner can view this history. Successful views and exports are recorded.</p>
         </div>
         <button className="button button-quiet" type="button" onClick={() => void downloadExport()} disabled={loading || exporting}>
           {exporting ? "Preparing export…" : "Export CSV"}
@@ -178,7 +189,7 @@ export function AuditPage({ farmId, role }: { farmId: string; role: string }) {
       )}
       <section className="content-card table-card">
         <div className="table-toolbar">
-          <div><h2 className="table-title">Recorded changes</h2><p className="table-subtitle">Sensitive before-and-after values are hidden unless your role permits them.</p></div>
+          <div><h2 className="table-title">Recorded changes</h2><p className="table-subtitle">Before-and-after snapshots are available to the farm owner.</p></div>
           <span className="table-hint">{pagination.total} events</span>
         </div>
         {loading ? (
@@ -199,13 +210,14 @@ export function AuditPage({ farmId, role }: { farmId: string; role: string }) {
                       <td><code>{event.record_id}</code></td>
                       <td>{event.actor_id ?? "System"}</td>
                       <td>
-                        <details>
-                          <summary>View changes</summary>
-                          <div className="audit-change-details">
-                            <strong>Before</strong><pre>{displayJson(event.old_data)}</pre>
-                            <strong>After</strong><pre>{displayJson(event.new_data)}</pre>
-                          </div>
-                        </details>
+                        <button
+                          className="audit-detail-link"
+                          type="button"
+                          onClick={() => setSelectedEvent(event)}
+                          aria-label={`Open audit event ${event.id}`}
+                        >
+                          View details
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -217,6 +229,74 @@ export function AuditPage({ farmId, role }: { farmId: string; role: string }) {
         ) : (
           <div className="empty-inline">{error ? "Audit history could not be loaded." : "No audit events match these filters."}</div>
         )}
+      </section>
+    </section>
+  );
+}
+
+function AuditEventDetail({ event, onBack }: { event: AuditEvent; onBack: () => void }) {
+  const operationLabels: Record<AuditEvent["operation"], string> = {
+    INSERT: "Created",
+    UPDATE: "Updated",
+    DELETE: "Deleted",
+  };
+
+  return (
+    <section className="audit-page audit-event-detail" aria-labelledby="audit-event-heading">
+      <header className="content-card audit-detail-header">
+        <button className="button button-quiet audit-detail-back" type="button" onClick={onBack}>
+          Back to history
+        </button>
+        <div>
+          <p className="eyebrow">{`AUDIT EVENT #${event.id}`}</p>
+          <div className="audit-detail-title">
+            <h1 id="audit-event-heading">{event.table_name.replaceAll("_", " ")}</h1>
+            <span className={`audit-operation-badge audit-operation-${event.operation.toLowerCase()}`}>
+              {operationLabels[event.operation]}
+            </span>
+          </div>
+          <p>Recorded change to a farm record.</p>
+        </div>
+      </header>
+
+      <dl className="content-card audit-detail-metadata">
+        <div>
+          <dt>Record ID</dt>
+          <dd><code>{event.record_id}</code></dd>
+        </div>
+        <div>
+          <dt>Farm ID</dt>
+          <dd><code>{event.farm_id}</code></dd>
+        </div>
+        <div>
+          <dt>Actor</dt>
+          <dd>{event.actor_id ?? "System"}</dd>
+        </div>
+        <div>
+          <dt>Recorded at (EAT)</dt>
+          <dd><time dateTime={event.occurred_at}>{dateTimeInNairobi(event.occurred_at)}</time></dd>
+        </div>
+      </dl>
+
+      <section className="audit-detail-snapshots" aria-label="Before and after snapshots">
+        <article className="content-card audit-snapshot-card">
+          <div className="audit-snapshot-heading">
+            <div>
+              <p className="eyebrow">PREVIOUS STATE</p>
+              <h2>Before</h2>
+            </div>
+          </div>
+          <pre aria-label="Before snapshot">{displayJson(event.old_data)}</pre>
+        </article>
+        <article className="content-card audit-snapshot-card">
+          <div className="audit-snapshot-heading">
+            <div>
+              <p className="eyebrow">RECORDED STATE</p>
+              <h2>After</h2>
+            </div>
+          </div>
+          <pre aria-label="After snapshot">{displayJson(event.new_data)}</pre>
+        </article>
       </section>
     </section>
   );
