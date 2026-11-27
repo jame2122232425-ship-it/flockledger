@@ -39,14 +39,14 @@ These results establish behavior in the local PostgreSQL/Supabase-compatibility 
 
 The following migrations were added:
 
-1. `supabase/migrations/202611260001_phase1b_inventory_officer_role.sql` — inventory officer role and related permissions.
-2. `supabase/migrations/202611260002_phase1b_lifecycle_permissions.sql` — lifecycle state and permission/onboarding structures.
-3. `supabase/migrations/202611260003_phase1b_financial_events.sql` — opening-cash, correction, adjustment, refund, and reconciliation records.
-4. `supabase/migrations/202611260004_phase1b_onboarding_rpcs.sql` — controlled application and platform decision RPCs.
-5. `supabase/migrations/202611260005_phase1b_financial_rpcs.sql` — financial transaction and correction RPCs.
-6. `supabase/migrations/202611260006_phase1b_database_lockdown.sql` — direct-write restrictions and permission enforcement.
-7. `supabase/migrations/202611260007_phase1b_reporting_integrity.sql` — revenue/reporting integrity, including unreconciled historical values.
-8. `supabase/migrations/202611260008_phase1b_audit_access.sql` — audit authorization, pagination/export limits, and access logging.
+1. `supabase/migrations/202611260002_phase1b_inventory_officer_role.sql` — inventory officer role and related permissions.
+2. `supabase/migrations/202611260004_phase1b_lifecycle_permissions.sql` — lifecycle state and permission/onboarding structures.
+3. `supabase/migrations/202611260005_phase1b_financial_events.sql` — opening-cash, correction, adjustment, refund, and reconciliation records.
+4. `supabase/migrations/202611260006_phase1b_onboarding_rpcs.sql` — controlled application and platform decision RPCs.
+5. `supabase/migrations/202611260007_phase1b_financial_rpcs.sql` — financial transaction and correction RPCs.
+6. `supabase/migrations/202611260008_phase1b_database_lockdown.sql` — direct-write restrictions and permission enforcement.
+7. `supabase/migrations/202611260009_phase1b_reporting_integrity.sql` — revenue/reporting integrity, including unreconciled historical values.
+8. `supabase/migrations/202611260010_phase1b_audit_access.sql` — audit authorization, pagination/export limits, and access logging.
 
 The migration chain was applied in filename order with `ON_ERROR_STOP=1`; any migration error stopped the run.
 
