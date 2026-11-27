@@ -1,4 +1,4 @@
-create function public.assign_sale_payment_reference()
+create or replace function public.assign_sale_payment_reference()
 returns trigger
 language plpgsql
 set search_path = ''
@@ -15,6 +15,8 @@ begin
   return new;
 end;
 $$;
+
+drop trigger if exists sale_payments_assign_reference on public.sale_payments;
 
 create trigger sale_payments_assign_reference
 before insert on public.sale_payments
