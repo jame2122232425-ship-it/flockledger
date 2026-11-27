@@ -39,6 +39,9 @@ describe("farm audit event details", () => {
   it("opens a snapshot detail view and returns to the filtered history", async () => {
     render(<AuditPage farmId={farmId} role="owner" />);
 
+    expect(await screen.findByRole("heading", { name: "Audit log" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Activity category" })).toBeTruthy();
+    expect(screen.getByText("Matching events")).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Open audit event 42" }));
 
     expect(screen.getByRole("heading", { name: "batches" })).toBeTruthy();
@@ -47,8 +50,37 @@ describe("farm audit event details", () => {
     expect(screen.getByLabelText("After snapshot").textContent).toContain("NEW-01");
 
     fireEvent.click(screen.getByRole("button", { name: "Back to history" }));
-    expect(screen.getByRole("heading", { name: "Farm activity history" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Audit log" })).toBeTruthy();
     expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters the event list by category and date range", async () => {
+    render(<AuditPage farmId={farmId} role="owner" />);
+
+    await screen.findByRole("button", { name: "Open audit event 42" });
+    fireEvent.click(screen.getByRole("button", { name: "Financial" }));
+    await waitFor(() => {
+      expect(requestMock).toHaveBeenLastCalledWith(
+        expect.stringContaining("category=financial"),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+
+    fireEvent.change(screen.getByLabelText("From date"), { target: { value: "2026-11-01" } });
+    await waitFor(() => {
+      expect(requestMock).toHaveBeenLastCalledWith(
+        expect.stringContaining("from=2026-11-01"),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear dates" }));
+    await waitFor(() => {
+      expect(requestMock).toHaveBeenLastCalledWith(
+        expect.not.stringContaining("from="),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
   });
 
   it("does not fetch or expose audit details to a non-owner", async () => {
