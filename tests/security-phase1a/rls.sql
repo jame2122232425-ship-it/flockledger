@@ -258,6 +258,40 @@ select
 from public.daily_records daily
 where daily.batch_id = '30000000-0000-4000-8000-000000000002';
 
+set local role authenticated;
+
+do $$
+declare
+  visible bigint;
+  sold_birds bigint;
+  sold_weight numeric;
+begin
+  select count(*) into visible
+  from public.batch_performance
+  where farm_id = '20000000-0000-4000-8000-000000000002'
+    and batch_id = '30000000-0000-4000-8000-000000000002';
+  perform pg_temp.assert_true(visible = 1, 'Authenticated dashboard can load batch performance');
+
+  select birds_sold, live_weight_sold_kg
+    into sold_birds, sold_weight
+  from public.get_batch_operational_sales(
+    '20000000-0000-4000-8000-000000000002',
+    '30000000-0000-4000-8000-000000000002'
+  );
+  perform pg_temp.assert_true(
+    sold_birds = 2 and sold_weight = 5,
+    'Operational sales helper returns declared count and weight types'
+  );
+
+  select count(*) into visible
+  from public.farm_dashboard
+  where farm_id = '20000000-0000-4000-8000-000000000002';
+  perform pg_temp.assert_true(visible = 1, 'Authenticated dashboard can load farm summary');
+end;
+$$;
+
+reset role;
+
 -- Authenticate as owner of Farm A.
 select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
