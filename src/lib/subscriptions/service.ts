@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { SUBSCRIPTIONS_ENABLED } from "@/lib/subscriptions/config";
 
 const subscriptionPlanCodeSchema = z.enum(["starter", "professional", "enterprise"]);
 const subscriptionStatusSchema = z.enum([
@@ -265,13 +266,14 @@ export function isFeatureEnabled(
   entitlements: FarmEntitlements,
   featureKey: string,
 ) {
-  return entitlements.features[featureKey]?.enabled === true;
+  return !SUBSCRIPTIONS_ENABLED || entitlements.features[featureKey]?.enabled === true;
 }
 
 export function getFeatureLevel(
   entitlements: FarmEntitlements,
   featureKey: string,
 ) {
+  if (!SUBSCRIPTIONS_ENABLED) return "unlimited";
   const level = entitlements.features[featureKey]?.configuration.level;
   return typeof level === "string" ? level : null;
 }
@@ -294,6 +296,16 @@ export function evaluateSubscriptionLimit(
   const requestedUsage = currentUsage + requestedIncrement;
   if (!Number.isSafeInteger(requestedUsage)) {
     throw new RangeError("Requested usage exceeds the safe integer range.");
+  }
+  if (!SUBSCRIPTIONS_ENABLED) {
+    return {
+      allowed: true,
+      configured: true,
+      limit: null,
+      currentUsage,
+      requestedIncrement,
+      remaining: null,
+    };
   }
   if (limit !== null && !Number.isSafeInteger(limit)) {
     throw new RangeError("Configured limit exceeds the safe integer range.");

@@ -34,6 +34,8 @@ vi.mock("@/lib/supabase/admin", () => ({
 import { POST as createBatch } from "@/app/api/batches/route";
 import { POST as createInvitation } from "@/app/api/farms/[farmId]/invitations/route";
 import { POST as addFarmMember } from "@/app/api/farms/[farmId]/members/route";
+import { GET as getSubscriptionPlans } from "@/app/api/subscription-plans/route";
+import { GET as getFarmSubscription, POST as startFarmTrial } from "@/app/api/farms/[farmId]/subscription/route";
 
 const farmId = "11111111-1111-4111-8111-111111111111";
 const authUserId = "22222222-2222-4222-8222-222222222222";
@@ -64,6 +66,10 @@ function invitationRequest() {
       password: "Temporary-pass-123",
     }),
   });
+}
+
+function farmSubscriptionRequest(method = "GET") {
+  return new NextRequest(`https://flockledger.test/api/farms/${farmId}/subscription`, { method });
 }
 
 beforeEach(() => {
@@ -117,6 +123,21 @@ beforeEach(() => {
 });
 
 describe("quota-protected API writes", () => {
+  it("allows an authorized batch write when the quota RPC succeeds", async () => {
+    mocks.supabase.rpc.mockResolvedValue({
+      data: { id: "66666666-6666-4666-8666-666666666666" },
+      error: null,
+    });
+
+    const response = await createBatch(batchRequest());
+
+    expect(response.status).toBe(201);
+    expect(mocks.supabase.rpc).toHaveBeenCalledWith(
+      "create_batch_with_quota",
+      expect.objectContaining({ p_farm_id: farmId }),
+    );
+  });
+
   it("returns a clear conflict when the batch quota RPC rejects creation", async () => {
     mocks.supabase.rpc.mockResolvedValue({
       data: null,
@@ -224,5 +245,54 @@ describe("quota-protected API writes", () => {
 
     expect(response.status).toBe(409);
     expect(payload.error).toContain("complete an invitation setup");
+  });
+
+  it("keeps authenticated farm subscription APIs dormant without reading entitlements", async () => {
+    const response = await getFarmSubscription(farmSubscriptionRequest(), {
+      params: Promise.resolve({ farmId }),
+    });
+
+    expect(response.status).toBe(410);
+    expect(mocks.supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("preserves farm membership and owner checks on dormant subscription APIs", async () => {
+    mocks.membershipQuery.maybeSingle.mockResolvedValue({ data: null, error: null });
+    const membershipResponse = await getFarmSubscription(farmSubscriptionRequest(), {
+      params: Promise.resolve({ farmId }),
+    });
+
+    expect(membershipResponse.status).toBe(403);
+
+    mocks.membershipQuery.maybeSingle.mockResolvedValue({
+      data: { role: "manager" },
+      error: null,
+    });
+    const roleResponse = await startFarmTrial(farmSubscriptionRequest("POST"), {
+      params: Promise.resolve({ farmId }),
+    });
+
+    expect(roleResponse.status).toBe(403);
+    expect(mocks.supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("requires authentication before returning a disabled subscription response", async () => {
+    mocks.supabase.auth.getUser.mockResolvedValue({
+      data: { user: null },
+      error: null,
+    });
+
+    const response = await startFarmTrial(farmSubscriptionRequest("POST"), {
+      params: Promise.resolve({ farmId }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(mocks.supabase.rpc).not.toHaveBeenCalled();
+  });
+
+  it("does not expose the public subscription plan catalog while dormant", async () => {
+    const response = await getSubscriptionPlans();
+
+    expect(response.status).toBe(410);
   });
 });

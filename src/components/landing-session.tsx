@@ -56,7 +56,7 @@ export function LandingNavActions() {
   ) : (
     <>
       <a className="landing-login" href="/login">Log in</a>
-      <a className="landing-button landing-button-amber" href="/signup">Start Free Trial</a>
+      <a className="landing-button landing-button-amber" href="/signup">Create Account</a>
     </>
   );
 }

@@ -50,41 +50,41 @@ describe("subscription entitlements", () => {
     })).toThrow();
   });
 
-  it("exposes configured feature flags and levels", () => {
+  it("disables plan-based feature flags and feature levels", () => {
     expect(isFeatureEnabled(starterEntitlements, "daily_records")).toBe(true);
-    expect(isFeatureEnabled(starterEntitlements, "advanced_analytics")).toBe(false);
-    expect(isFeatureEnabled(starterEntitlements, "unknown_feature")).toBe(false);
-    expect(getFeatureLevel(starterEntitlements, "health_management")).toBe("basic");
-    expect(getFeatureLevel(starterEntitlements, "daily_records")).toBeNull();
+    expect(isFeatureEnabled(starterEntitlements, "advanced_analytics")).toBe(true);
+    expect(isFeatureEnabled(starterEntitlements, "unknown_feature")).toBe(true);
+    expect(getFeatureLevel(starterEntitlements, "health_management")).toBe("unlimited");
+    expect(getFeatureLevel(starterEntitlements, "daily_records")).toBe("unlimited");
   });
 
-  it("allows usage up to a configured limit and rejects increments beyond it", () => {
+  it("does not enforce configured subscription limits", () => {
     expect(evaluateSubscriptionLimit(
       starterEntitlements,
       "max_active_batches",
-      1,
+      100,
     )).toMatchObject({
       allowed: true,
       configured: true,
-      limit: 2,
-      remaining: 1,
+      limit: null,
+      remaining: null,
     });
     expect(evaluateSubscriptionLimit(
       starterEntitlements,
       "max_active_batches",
-      2,
+      100,
     )).toMatchObject({
-      allowed: false,
+      allowed: true,
       configured: true,
-      limit: 2,
-      remaining: 0,
+      limit: null,
+      remaining: null,
     });
     expect(evaluateSubscriptionLimit(
       starterEntitlements,
       "max_staff_users",
-      1,
-      2,
-    ).allowed).toBe(false);
+      100,
+      200,
+    ).allowed).toBe(true);
   });
 
   it("treats an explicit null enterprise limit as unbounded but missing configuration as unavailable", () => {
@@ -106,10 +106,11 @@ describe("subscription entitlements", () => {
     expect(evaluateSubscriptionLimit(
       incomplete,
       "max_active_batches",
-      0,
+      100,
     )).toMatchObject({
-      allowed: false,
-      configured: false,
+      allowed: true,
+      configured: true,
+      limit: null,
     });
   });
 

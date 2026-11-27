@@ -30,7 +30,7 @@ describe("mobile navigation", () => {
     fireEvent.click(toggle);
     expect(screen.getByRole("button", { name: "Close menu" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("link", { name: "Features" }).getAttribute("href")).toBe("#features");
-    expect(screen.getByRole("link", { name: "Pricing" }).getAttribute("href")).toBe("/pricing");
+    expect(screen.queryByRole("link", { name: "Pricing" })).toBeNull();
     expect(screen.getByRole("link", { name: "Log in" }).getAttribute("href")).toBe("/login");
 
     fireEvent.keyDown(document, { key: "Escape" });
@@ -52,19 +52,19 @@ describe("mobile navigation", () => {
   it("shows owner and extra workspace actions in the account menu", () => {
     const onTeam = vi.fn();
     const onSignOut = vi.fn();
-    const onBilling = vi.fn();
+    const onAudit = vi.fn();
     render(
       <MobileAccountMenu
         isOwner
         busy={false}
-        extraLinks={[{ label: "Billing", onClick: onBilling }]}
+        extraLinks={[{ label: "Audit history", onClick: onAudit }]}
         onTeam={onTeam}
         onSignOut={onSignOut}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
-    fireEvent.click(screen.getByRole("button", { name: "Billing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Audit history" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
     fireEvent.click(screen.getByRole("button", { name: "Manage team" }));
@@ -72,7 +72,7 @@ describe("mobile navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open account menu" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
-    expect(onBilling).toHaveBeenCalledOnce();
+    expect(onAudit).toHaveBeenCalledOnce();
     expect(onTeam).toHaveBeenCalledOnce();
     expect(onSignOut).toHaveBeenCalledOnce();
   });

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/app-icon";
 
-export type AppTab = "overview" | "batches" | "daily" | "revenue" | "audit" | "platform" | "billing";
+export type AppTab = "overview" | "batches" | "daily" | "revenue" | "audit" | "platform";
 
 const primaryTabs = [
   { id: "overview", label: "Overview", icon: "overview" },
@@ -164,7 +164,6 @@ export function MobileNavMenu({ featuresHref = "#features" }: { featuresHref?: s
       {open && (
         <div className="landing-mobile-links" id="landing-mobile-links" role="group" aria-label="Mobile navigation">
           <Link href={featuresHref} {...linkProps}>Features</Link>
-          <Link href="/pricing" {...linkProps}>Pricing</Link>
           <Link href="/guides" {...linkProps}>Guides</Link>
           <Link href="/faq" {...linkProps}>FAQ</Link>
           <Link href="/login" {...linkProps}>Log in</Link>

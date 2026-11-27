@@ -40,10 +40,6 @@ const PlatformAdminPage = dynamic(
   () => import("@/components/platform-admin-page").then((module) => module.PlatformAdminPage),
   { loading: () => <div className="empty-inline">Loading platform controls…</div> },
 );
-const FarmSubscriptionPage = dynamic(
-  () => import("@/components/farm-subscription-page"),
-  { loading: () => <div className="empty-inline">Loading farm billing…</div> },
-);
 
 type Farm = {
   id: string;
@@ -81,7 +77,7 @@ function subscribeToTabChanges(onChange: () => void) {
 function getTabFromLocation(): Tab {
   const tab = new URLSearchParams(window.location.search).get("tab");
   return tab === "batches" || tab === "daily" || tab === "revenue" || tab === "audit"
-    || tab === "platform" || tab === "billing"
+    || tab === "platform"
     ? tab
     : "overview";
 }
@@ -976,7 +972,7 @@ export default function FlockLedgerApp({
             ? "Audit history"
             : tab === "platform"
               ? "Platform administration"
-              : "Billing";
+              : "Overview";
 
   return (
     <main className="app-shell">
@@ -1075,7 +1071,7 @@ export default function FlockLedgerApp({
                 </button>
               )}
             </div>
-            {tab === "daily" || (tab !== "revenue" && tab !== "audit" && tab !== "platform" && tab !== "billing" && canCreateBatches) ? (
+            {tab === "daily" || (tab !== "revenue" && tab !== "audit" && tab !== "platform" && canCreateBatches) ? (
               <button className="button button-primary topbar-add" type="button" disabled={!farmIsActive} onClick={() => openDialog(tab === "daily" ? "daily" : "batch")}>
                 {tab === "daily" ? "Add daily record" : "New batch"}
               </button>
@@ -1086,7 +1082,6 @@ export default function FlockLedgerApp({
               extraLinks={[
                 ...(canViewAudit && activeFarm ? [{ label: "Audit history", onClick: () => navigateToTab("audit") }] : []),
                 ...(isPlatformAdmin ? [{ label: "Platform administration", onClick: () => navigateToTab("platform") }] : []),
-                ...(activeFarm ? [{ label: "Billing", onClick: () => navigateToTab("billing") }] : []),
               ]}
               onTeam={() => { openDialog("team"); void loadTeam(); }}
               onSignOut={() => void handleSignOut()}
@@ -1163,14 +1158,7 @@ export default function FlockLedgerApp({
             canViewAudit
               ? <AuditPage key={activeFarm.id} farmId={activeFarm.id} role={activeFarm.role} />
               : <section className="welcome-card"><h1>Audit access is restricted</h1><p>Your farm role does not include audit visibility.</p></section>
-          ) : (
-            <FarmSubscriptionPage
-              key={activeFarm.id}
-              farmId={activeFarm.id}
-              farmName={activeFarm.name}
-              farmRole={activeFarm.role}
-            />
-          )}
+          ) : null}
         </div>
       </section>
 

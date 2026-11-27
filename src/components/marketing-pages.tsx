@@ -119,8 +119,8 @@ function PageBody({ page }: { page: MarketingPageKey }) {
           <p>Users access records through their signed-in account. Farm membership and role permissions are enforced by the database.</p>
         </details>
         <details>
-          <summary>Where can I get pricing information?</summary>
-          <p>Pricing details are not published here yet. <Link href="/contact">Contact our team</Link> for current information.</p>
+          <summary>Are subscriptions or paid plans required?</summary>
+          <p>No. Subscription and plan enforcement are currently inactive. Approved, active farms can use features allowed by their farm roles.</p>
         </details>
       </div>
     );
@@ -164,7 +164,6 @@ function PageBody({ page }: { page: MarketingPageKey }) {
           <div className="marketing-link-list">
             <Link href="/guides">Read the farm guides</Link>
             <Link href="/faq">Visit frequently asked questions</Link>
-            <Link href="/pricing">Ask about pricing</Link>
           </div>
         </section>
       </div>
@@ -204,7 +203,6 @@ function MarketingNav() {
       </Link>
       <div className="landing-nav-links">
         <Link href="/#features">Features</Link>
-        <Link href="/pricing">Pricing</Link>
         <Link href="/guides">Guides</Link>
         <Link href="/faq">FAQ</Link>
       </div>
@@ -227,7 +225,7 @@ function MarketingFooter() {
           </Link>
           <p>Better poultry records. Better farm decisions.</p>
         </div>
-        <div><strong>Product</strong><Link href="/#features">Features</Link><Link href="/pricing">Pricing</Link><Link href="/guides">Guides</Link></div>
+        <div><strong>Product</strong><Link href="/#features">Features</Link><Link href="/guides">Guides</Link></div>
         <div><strong>Company</strong><Link href="/about">About Us</Link><Link href="/contact">Contact</Link><Link href="/blog">Blog</Link></div>
         <div><strong>Legal</strong><Link href="/privacy">Privacy Policy</Link><Link href="/terms">Terms of Service</Link><Link href="/security">Data Security</Link></div>
         <div><strong>Contact</strong><a href="mailto:support@flockledger.co.ke">Support email</a><Link href="/contact">Contact us</Link></div>

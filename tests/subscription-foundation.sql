@@ -4,6 +4,10 @@
 -- The transaction is rolled back; fixture auth users and farms are never retained.
 begin;
 
+update public.subscription_enforcement_config
+set enabled = true
+where singleton;
+
 do $$
 begin
   if (select count(*) from public.subscription_plans) <> 3 then
@@ -443,7 +447,7 @@ begin
       and s.farm_id = v_farm_id
       and p.code = 'professional'
       and s.status = 'canceled';
-  exception when foreign_key_violation then
+  exception when restrict_violation or foreign_key_violation then
     rejected := true;
   end;
   if not rejected then

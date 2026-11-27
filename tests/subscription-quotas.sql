@@ -4,6 +4,10 @@
 -- Fixtures and all subscription/resource changes are rolled back.
 begin;
 
+update public.subscription_enforcement_config
+set enabled = true
+where singleton;
+
 select gen_random_uuid() as owner_id,
        gen_random_uuid() as second_owner_id,
        gen_random_uuid() as existing_staff_id,
@@ -380,8 +384,10 @@ end;
 $$;
 select set_config('request.jwt.claim.sub', :'second_owner_id', true);
 set local role authenticated;
-delete from public.farm_memberships
-where farm_id = :'second_farm_id'::uuid and user_id = :'invited_staff_id'::uuid;
+select public.remove_farm_member(
+  :'second_farm_id'::uuid,
+  :'invited_staff_id'::uuid
+);
 do $$
 declare
   v_farm_id uuid := current_setting('flockledger.test.second_farm_id')::uuid;
@@ -419,8 +425,10 @@ where invitation.farm_id = :'second_farm_id'::uuid
 
 select set_config('request.jwt.claim.sub', :'second_owner_id', true);
 set local role authenticated;
-delete from public.farm_memberships
-where farm_id = :'second_farm_id'::uuid and user_id = :'invited_staff_id'::uuid;
+select public.remove_farm_member(
+  :'second_farm_id'::uuid,
+  :'invited_staff_id'::uuid
+);
 do $$
 declare
   v_farm_id uuid := current_setting('flockledger.test.second_farm_id')::uuid;
@@ -537,6 +545,192 @@ select public.update_farm_member_role(
   :'existing_staff_id'::uuid,
   'attendant'
 );
+
+reset role;
+update public.subscription_enforcement_config
+set enabled = false
+where singleton;
+update public.farm_subscriptions
+set status = 'trialing',
+    trial_started_at = statement_timestamp() - interval '15 days',
+    trial_ends_at = statement_timestamp() - interval '1 day'
+where farm_id = :'second_farm_id'::uuid;
+update public.farm_memberships
+set role = 'owner'
+where farm_id = :'second_farm_id'::uuid
+  and user_id = :'existing_staff_id'::uuid;
+select set_config('request.jwt.claim.sub', :'second_owner_id', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+set local role authenticated;
+do $$
+declare
+  v_farm_id uuid := current_setting('flockledger.test.second_farm_id')::uuid;
+  v_other_farm_id uuid := current_setting('flockledger.test.farm_id')::uuid;
+  v_subscription_status text;
+  v_trial_ends_at timestamptz;
+  event_count bigint;
+  rejected boolean := false;
+begin
+  select subscription.status, subscription.trial_ends_at
+  into v_subscription_status, v_trial_ends_at
+  from public.farm_subscriptions subscription
+  where subscription.farm_id = v_farm_id;
+  select count(*) into event_count
+  from public.subscription_events
+  where farm_id = v_farm_id;
+
+  perform public.update_farm_member_role(
+    v_farm_id,
+    current_setting('flockledger.test.existing_staff_id')::uuid,
+    'attendant'
+  );
+
+  for index in 4..6 loop
+    perform public.create_batch_with_quota(
+      v_farm_id, 'S3-UNLIMITED-' || index::text, 'Broiler', null, null,
+      current_date, null, null, 0, 100, null
+    );
+  end loop;
+
+  for index in 1..3 loop
+    perform public.reserve_farm_staff_seat(
+      v_farm_id,
+      's3-unlimited-' || index::text || '@example.invalid',
+      'attendant',
+      null,
+      repeat(chr(64 + index), 64),
+      repeat(chr(67 + index), 64)
+    );
+  end loop;
+
+  if (select count(*) from public.batches
+      where farm_id = v_farm_id and status = 'running') <> 6 then
+    raise exception 'Disabled subscription enforcement must allow batches beyond the saved plan limit.';
+  end if;
+  if has_table_privilege('authenticated', 'public.subscription_enforcement_config', 'SELECT')
+    or has_table_privilege('authenticated', 'public.subscription_enforcement_config', 'UPDATE')
+    or has_function_privilege('authenticated', 'public.subscription_enforcement_is_enabled()', 'EXECUTE') then
+    raise exception 'Authenticated users must not control or inspect the subscription enforcement switch.';
+  end if;
+
+  begin
+    perform public.get_farm_entitlements(v_farm_id);
+  exception when sqlstate '55000' then
+    rejected := true;
+  end;
+  if not rejected then
+    raise exception 'Direct entitlement reads must not trigger subscription expiration while disabled.';
+  end if;
+
+  rejected := false;
+  begin
+    perform public.start_professional_trial(v_farm_id);
+  exception when sqlstate '55000' then
+    rejected := true;
+  end;
+  if not rejected then
+    raise exception 'Trial creation must remain dormant while subscription enforcement is disabled.';
+  end if;
+
+  rejected := false;
+  begin
+    perform public.request_subscription_cancellation(v_farm_id);
+  exception when sqlstate '55000' then
+    rejected := true;
+  end;
+  if not rejected then
+    raise exception 'Subscription cancellation must remain dormant while enforcement is disabled.';
+  end if;
+
+  rejected := false;
+  begin
+    perform public.create_batch_with_quota(
+      v_other_farm_id, 'S3-UNAUTHORIZED-FARM', 'Broiler', null, null,
+      current_date, null, null, 0, 100, null
+    );
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  if not rejected then
+    raise exception 'Disabling quotas must not allow cross-farm batch creation.';
+  end if;
+
+  if (select subscription.status from public.farm_subscriptions subscription
+      where subscription.farm_id = v_farm_id) is distinct from v_subscription_status
+    or (select subscription.trial_ends_at from public.farm_subscriptions subscription
+        where subscription.farm_id = v_farm_id) is distinct from v_trial_ends_at
+    or (select count(*) from public.subscription_events where farm_id = v_farm_id)
+       <> event_count then
+    raise exception 'Normal farm operations must not alter historical subscription status, dates, or events.';
+  end if;
+end;
+$$;
+
+reset role;
+update public.farms
+set lifecycle_status = 'suspended'
+where id = :'second_farm_id'::uuid;
+select set_config('request.jwt.claim.sub', :'second_owner_id', true);
+set local role authenticated;
+do $$
+declare
+  rejected boolean := false;
+begin
+  begin
+    perform public.create_batch_with_quota(
+      current_setting('flockledger.test.second_farm_id')::uuid,
+      'S3-SUSPENDED-FARM',
+      'Broiler',
+      null,
+      null,
+      current_date,
+      null,
+      null,
+      0,
+      100,
+      null
+    );
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  if not rejected then
+    raise exception 'Suspended farms must remain unable to create batches.';
+  end if;
+end;
+$$;
+
+reset role;
+update public.farms
+set lifecycle_status = 'pending_approval'
+where id = :'farm_id'::uuid;
+select set_config('request.jwt.claim.sub', :'owner_id', true);
+set local role authenticated;
+do $$
+declare
+  rejected boolean := false;
+begin
+  begin
+    perform public.create_batch_with_quota(
+      current_setting('flockledger.test.farm_id')::uuid,
+      'S3-PENDING-FARM',
+      'Broiler',
+      null,
+      null,
+      current_date,
+      null,
+      null,
+      0,
+      100,
+      null
+    );
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  if not rejected then
+    raise exception 'Unapproved farms must remain unable to create batches.';
+  end if;
+end;
+$$;
 
 reset role;
 select set_config('request.jwt.claim.sub', '', true);

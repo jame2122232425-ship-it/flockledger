@@ -29,6 +29,8 @@ exception when duplicate_object then
 end;
 $$;
 
+alter role service_role bypassrls;
+
 grant service_role to postgres;
 grant anon to postgres;
 grant authenticated to postgres;
