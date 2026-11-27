@@ -6,7 +6,8 @@ describe("editable record definitions", () => {
     expect(editableResources["daily-records"].editableFields.dead.schema.safeParse(2).success).toBe(true);
     expect(editableResources["daily-records"].editableFields.dead.schema.safeParse(-1).success).toBe(false);
     expect(editableResources.batches.editableFields.status).toBeUndefined();
-    expect(editableResources["sales"].editableFields.amountKes).toBeUndefined();
+    expect(editableResources.sales).toBeUndefined();
+    expect(editableResources["cash-entries"]).toBeUndefined();
     expect(editableResources["daily-records"].editableFields.batchId).toBeUndefined();
     expect(editableResources.batches.deletable).toBe(false);
     expect(editableResources.corrections).toBeUndefined();

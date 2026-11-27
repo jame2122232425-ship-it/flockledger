@@ -105,32 +105,6 @@ export const editableResources: Record<string, EditableResource> = {
       remarks: text("remarks", 2000),
     },
   },
-  sales: {
-    table: "sales",
-    fields: "id, farm_id, batch_id, sale_date, customer, birds_sold, total_weight_kg, price_basis, price_kes, amount_kes, receipt_number, remarks, created_at",
-    editableFields: {
-      saleDate: date("sale_date"),
-      customer: requiredText("customer", 128),
-      birdsSold: field("birds_sold", z.number().int().positive()),
-      totalWeightKg: field("total_weight_kg", z.number().positive()),
-      priceBasis: field("price_basis", z.enum(["Bird", "Kg"])),
-      priceKes: number("price_kes"),
-      receiptNumber: text("receipt_number", 64),
-      remarks: text("remarks", 2000),
-    },
-  },
-  "cash-entries": {
-    table: "cash_entries",
-    fields: "id, farm_id, entry_date, details, category, batch_id, receipt_number, money_in_kes, money_out_kes, created_at",
-    editableFields: {
-      entryDate: date("entry_date"),
-      details: requiredText("details", 255),
-      category: requiredText("category", 64),
-      receiptNumber: text("receipt_number", 64),
-      moneyInKes: number("money_in_kes"),
-      moneyOutKes: number("money_out_kes"),
-    },
-  },
   inventory: {
     table: "inventory_items",
     fields: "id, farm_id, name, item_type, unit, reorder_level, expiry_date, created_at",

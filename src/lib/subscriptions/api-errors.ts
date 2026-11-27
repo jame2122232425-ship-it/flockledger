@@ -1,5 +1,30 @@
 import { apiError } from "@/lib/api";
 import { SubscriptionServiceError } from "@/lib/subscriptions/service";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+export async function inactiveSubscriptionApiResponse(
+  supabase: SupabaseClient,
+  farmId: string,
+  userId: string,
+  ownerOnly = false,
+) {
+  const { data: membership, error } = await supabase
+    .from("farm_memberships")
+    .select("role")
+    .eq("farm_id", farmId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to verify farm subscription access:", error.code);
+    return apiError("Could not verify farm membership.", 500);
+  }
+  if (!membership) return apiError("You are not authorized for this farm.", 403);
+  if (ownerOnly && membership.role !== "owner") {
+    return apiError("Only farm owners can manage subscriptions.", 403);
+  }
+  return apiError("Subscriptions are currently unavailable.", 410);
+}
 
 export function subscriptionApiError(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {

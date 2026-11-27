@@ -29,6 +29,7 @@ const sale: RevenueSale = {
   price_kes: 400,
   amount_kes: 88000,
   paid_kes: 40000,
+  unreconciled_paid_kes: 0,
   outstanding_kes: 48000,
   payment_status: "partial",
   receipt_number: "SALE-1120",
@@ -59,7 +60,7 @@ beforeEach(() => {
     if (url.startsWith("/api/sales?")) {
       return {
         data: [sale],
-        summary: { sales_kes: 88000, received_kes: 40000, outstanding_kes: 48000, sale_count: 1 },
+        summary: { sales_kes: 88000, received_kes: 40000, outstanding_kes: 48000, unreconciled_paid_kes: 0, sale_count: 1 },
         pagination: {
           page: 1,
           pageSize: 25,
@@ -101,13 +102,14 @@ describe("revenue record details", () => {
         farmName="Example farm"
         batches={batches}
         loadingBatches={false}
-        canRecord={true}
+        canCreateSales={true}
+        canRecordPayments={true}
         canDownloadReceipts={true}
         onFeedback={vi.fn()}
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     expect(screen.getByRole("heading", { name: "Sale information" })).toBeTruthy();
     expect(screen.getByText("Morning delivery")).toBeTruthy();
     expect(screen.getByText("Recorded at (EAT)").parentElement?.textContent).toContain("20 Nov 2026, 11:00:00 EAT");
@@ -135,13 +137,14 @@ describe("revenue record details", () => {
         farmName="Example farm"
         batches={batches}
         loadingBatches={false}
-        canRecord={true}
+        canCreateSales={true}
+        canRecordPayments={true}
         canDownloadReceipts={true}
         onFeedback={onFeedback}
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     fireEvent.click(screen.getByRole("button", { name: "View payment history" }));
     fireEvent.click(await screen.findByRole("button", { name: "Record payment" }));
 

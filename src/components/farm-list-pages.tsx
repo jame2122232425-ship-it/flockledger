@@ -262,7 +262,7 @@ export function BatchesPage({
           <div className="notice error-notice" role="alert">{error}</div>
         ) : payload && visible.length ? (
           <>
-            <div className="table-scroll">
+            <div className="table-scroll desktop-table-scroll">
               <table>
                 <thead>
                   <tr>
@@ -295,6 +295,34 @@ export function BatchesPage({
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="mobile-list">
+              {visible.map((batch: Batch) => (
+                <article className="mobile-list-card" key={`mobile-${batch.batch_id}`}>
+                  <div className="mobile-list-card-top">
+                    <span className="table-batch">
+                      <span className={`table-batch-mark ${batch.batch_type === "Broiler" ? "broiler" : "kienyeji"}`}>
+                        <Icon name="bird" />
+                      </span>
+                      <span>
+                        <strong>{batch.batch_code}</strong>
+                        <small>{batch.batch_type}{batch.house ? ` · ${batch.house}` : ""}</small>
+                      </span>
+                    </span>
+                    <span className={`status-pill ${batch.status}`}>{batch.status === "running" ? "Active" : "Closed"}</span>
+                  </div>
+                  <div className="mobile-list-values">
+                    <span><small>Placed</small><strong>{shortDate(batch.date_placed)}</strong></span>
+                    <span><small>Birds</small><strong>{formatNumber(batch.chicks_received)}</strong></span>
+                    <span><small>Age</small><strong>{batch.status === "running" ? `Day ${formatNumber(batch.age_days)}` : "—"}</strong></span>
+                    <span><small>Mortality</small><strong>{formatNumber(batch.mortality_percent, 1)}%</strong></span>
+                    <span><small>FCR</small><strong>{batch.fcr == null ? "—" : formatNumber(batch.fcr, 2)}</strong></span>
+                  </div>
+                  <div className="mobile-list-actions">
+                    <button className="revenue-action-link primary" type="button" onClick={() => { setBatchDetail(null); setSelectedBatch(batch); }}>View details →</button>
+                  </div>
+                </article>
+              ))}
             </div>
             <PaginationControls pagination={payload.pagination} onPageChange={setPage} />
           </>
@@ -426,7 +454,7 @@ export function DailyPage({
           <div className="empty-inline">Loading daily records…</div>
         ) : records.length ? (
           <>
-            <div className="table-scroll">
+            <div className="table-scroll desktop-table-scroll">
               <table>
                 <thead>
                   <tr><th>Date</th><th>Batch</th><th>Feed used</th><th>Water</th><th>Deaths</th><th>Culls</th><th>Initials</th><th>Actions</th></tr>
@@ -446,6 +474,28 @@ export function DailyPage({
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="mobile-list">
+              {records.map((record) => (
+                <article className="mobile-list-card" key={`mobile-${record.id}`}>
+                  <div className="mobile-list-card-top">
+                    <span>
+                      <strong>{batchNames.get(record.batch_id) ?? "Daily record"}</strong>
+                      <small>{shortDate(record.record_date)}</small>
+                    </span>
+                    <span className="mobile-list-initials">{record.initials || "—"}</span>
+                  </div>
+                  <div className="mobile-list-values">
+                    <span><small>Feed used</small><strong>{formatNumber(record.feed_given_kg - record.feed_left_kg, 2)} kg</strong></span>
+                    <span><small>Water</small><strong>{formatNumber(record.water_liters, 1)} L</strong></span>
+                    <span><small>Deaths</small><strong>{formatNumber(record.dead)}</strong></span>
+                    <span><small>Culls</small><strong>{formatNumber(record.culled)}</strong></span>
+                  </div>
+                  <div className="mobile-list-actions">
+                    <button className="revenue-action-link primary" type="button" onClick={() => setSelectedRecord(record)}>View details →</button>
+                  </div>
+                </article>
+              ))}
             </div>
             <PaginationControls pagination={pagination} onPageChange={setPage} />
           </>

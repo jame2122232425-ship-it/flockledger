@@ -43,3 +43,65 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-publishable-key
           SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-server-key
           NEXT_PUBLIC_APP_URL: https://ci-placeholder.example
+
+  security-phase-1a:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: flockledger_security
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d flockledger_security"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      PGDATABASE: flockledger_security
+      PGHOST: 127.0.0.1
+      PGUSER: postgres
+      PGPORT: 5432
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Create Supabase-compatible auth test roles
+        run: psql -v ON_ERROR_STOP=1 -f tests/security-phase1a/setup.sql
+
+      - name: Apply migrations
+        run: |
+          for migration in supabase/migrations/*.sql; do
+            echo "Applying $migration"
+            psql -v ON_ERROR_STOP=1 -f "$migration"
+          done
+
+      - name: Run tenant, role, financial, and audit verification
+        run: psql -v ON_ERROR_STOP=1 -f tests/security-phase1a/rls.sql
+
+      - name: Prove the RLS detector fails closed
+        shell: bash
+        run: |
+          output="$(mktemp)"
+          set +e
+          psql -v ON_ERROR_STOP=1 -f tests/security-phase1a/negative-control.sql >"$output" 2>&1
+          status=$?
+          set -e
+          cat "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "Negative control unexpectedly passed."
+            exit 1
+          fi
+          if ! grep -q "DETECTOR_CAUGHT_BROKEN_RLS" "$output"; then
+            echo "Negative control failed for an unexpected reason."
+            exit 1
+          fi

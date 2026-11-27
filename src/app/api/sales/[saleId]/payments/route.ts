@@ -3,7 +3,7 @@ import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { salePaymentCreateSchema } from "@/lib/validation/sales";
-import { payloadHash, requireIdempotencyKey } from "@/lib/security";
+import { requireIdempotencyKey } from "@/lib/security";
 import {
   paginationMetadata,
   paginationRange,
@@ -106,13 +106,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       p_amount_kes: payment.amountKes,
       p_reference: payment.reference || null,
       p_idempotency_key: idempotencyKey,
-      p_payload_hash: payloadHash({
-        farmId: payment.farmId,
-        saleId: saleId.data,
-        paymentDate: payment.paymentDate,
-        amountKes: payment.amountKes,
-        reference: payment.reference || null,
-      }),
     });
     if (error) {
       if (error.code === "42501") return apiError("You cannot record payments for this farm.", 403);

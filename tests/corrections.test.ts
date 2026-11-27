@@ -18,7 +18,18 @@ describe("correctionCreateSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("allows payment adjustments to an original sale", () => {
+  it("allows source-linked operational corrections without financial deltas", () => {
+    const result = correctionCreateSchema.safeParse({
+      ...baseCorrection,
+      sourceTable: "daily_records",
+      sourceRecordId: "33333333-3333-4333-8333-333333333333",
+      deadDelta: -1,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects payment adjustments outside the financial approval workflow", () => {
     const result = correctionCreateSchema.safeParse({
       ...baseCorrection,
       sourceTable: "sales",
@@ -26,7 +37,7 @@ describe("correctionCreateSchema", () => {
       paidKesDelta: 100,
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 
   it("rejects a new sale correction when payment exceeds its revenue", () => {
@@ -42,7 +53,7 @@ describe("correctionCreateSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("requires a new cashbook correction to add exactly one positive amount", () => {
+  it("rejects direct cashbook adjustments outside the financial approval workflow", () => {
     const valid = correctionCreateSchema.safeParse({
       ...baseCorrection,
       sourceTable: "cash_entries",
@@ -55,11 +66,11 @@ describe("correctionCreateSchema", () => {
       moneyOutKesDelta: 25,
     });
 
-    expect(valid.success).toBe(true);
+    expect(valid.success).toBe(false);
     expect(invalid.success).toBe(false);
   });
 
-  it("allows a negative reversal against an identified cashbook row", () => {
+  it("rejects cash reversals outside the financial approval workflow", () => {
     const result = correctionCreateSchema.safeParse({
       ...baseCorrection,
       sourceTable: "cash_entries",
@@ -67,6 +78,6 @@ describe("correctionCreateSchema", () => {
       moneyOutKesDelta: -50,
     });
 
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
   });
 });

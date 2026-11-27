@@ -8,7 +8,7 @@ import {
   parsePagination,
 } from "@/lib/api/pagination";
 import { correctionCreateSchema } from "@/lib/validation/corrections";
-import { payloadHash, requireIdempotencyKey } from "@/lib/security";
+import { requireIdempotencyKey } from "@/lib/security";
 
 export async function GET(request: NextRequest) {
   const pagination = parsePagination(request.nextUrl.searchParams);
@@ -60,23 +60,15 @@ export async function POST(request: NextRequest) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    const { data, error } = await supabase.rpc("create_correction_idempotent", {
+    const { data, error } = await supabase.rpc("create_operational_correction_idempotent", {
       p_farm_id: correction.farmId,
       p_batch_id: correction.batchId,
-      p_source_table: correction.sourceTable,
-      p_source_record_id: correction.sourceRecordId ?? null,
+      p_source_record_id: correction.sourceRecordId,
       p_reason: correction.reason,
       p_dead_delta: correction.deadDelta,
       p_culled_delta: correction.culledDelta,
-      p_birds_sold_delta: correction.birdsSoldDelta,
-      p_live_weight_sold_kg_delta: correction.liveWeightSoldKgDelta,
       p_feed_consumed_kg_delta: correction.feedConsumedKgDelta,
-      p_revenue_kes_delta: correction.revenueKesDelta,
-      p_paid_kes_delta: correction.paidKesDelta,
-      p_money_in_kes_delta: correction.moneyInKesDelta,
-      p_money_out_kes_delta: correction.moneyOutKesDelta,
       p_idempotency_key: idempotencyKey,
-      p_payload_hash: payloadHash(correction),
     });
     if (error) {
       if (error.code === "42501") return apiError("Only farm owners or managers can add corrections.", 403);

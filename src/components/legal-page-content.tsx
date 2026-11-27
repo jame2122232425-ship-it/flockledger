@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 type LegalPageKey = "privacy" | "terms" | "security";
 
 export default function LegalPageContent({ page }: { page: LegalPageKey }) {
@@ -47,8 +45,8 @@ export default function LegalPageContent({ page }: { page: LegalPageKey }) {
             <p>Reports and calculations are operational aids, not veterinary, legal, or financial advice. Verify important records and use qualified professional advice for animal health, medication, food safety, and business decisions.</p>
           </section>
           <section className="marketing-card">
-            <h2>Plans, trials, and service changes</h2>
-            <p>Plan descriptions and displayed prices are provided on the <Link href="/pricing">Pricing page</Link>. Paid billing, trial conditions, cancellation, refunds, and any plan-specific limits must be confirmed in the final terms before paid subscriptions are offered.</p>
+            <h2>Service availability and changes</h2>
+            <p>Subscription and plan enforcement are currently inactive. Farm access depends on approval, lifecycle status, membership, and role permissions; no subscription payment or trial is required for farm operations.</p>
             <p>We may update or discontinue parts of the service. The final terms should explain how material changes and service availability will be handled.</p>
           </section>
           <section className="marketing-card">

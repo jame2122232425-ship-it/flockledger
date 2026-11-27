@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { payloadHash, requireIdempotencyKey } from "@/lib/security";
+import { requireIdempotencyKey } from "@/lib/security";
 import {
   paginationMetadata,
   paginationRange,
@@ -123,16 +123,6 @@ export async function POST(request: NextRequest) {
       p_money_in_kes: entry.moneyInKes,
       p_money_out_kes: entry.moneyOutKes,
       p_idempotency_key: idempotencyKey,
-      p_payload_hash: payloadHash({
-        farmId: entry.farmId,
-        batchId: entry.batchId ?? null,
-        entryDate: entry.entryDate,
-        details: entry.details,
-        category: entry.category,
-        receiptNumber: entry.receiptNumber ?? null,
-        moneyInKes: entry.moneyInKes,
-        moneyOutKes: entry.moneyOutKes,
-      }),
     });
     if (error) {
       if (error.code === "42501") return apiError("You cannot add cash entries for this farm.", 403);

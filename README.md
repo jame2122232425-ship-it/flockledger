@@ -14,7 +14,7 @@ Farm data requests use the signed-in user's Supabase session, and PostgreSQL Row
 
 ## Frontend
 
-The public marketing site includes the landing page and dedicated Pricing, Guides, FAQ, About, Contact, Blog, Privacy Policy, Terms of Service, and Data Security pages. The three legal pages contain draft copy and require review and approval before publication. Pricing and farm billing read the active subscription catalog; billing is in KES, and unset paid prices are shown as unavailable. The frontend does not provide checkout or collect payments.
+The public marketing site includes the landing page, Guides, FAQ, About, Contact, Blog, Privacy Policy, Terms of Service, and Data Security pages. The three legal pages contain draft copy and require review and approval before publication. Subscription pricing and billing are dormant; the old screens remain in source but are not linked, and `/pricing` redirects to the landing page.
 
 The farm app includes email sign-in/sign-up, farm setup, and farm switching within one account. Owners can create farms, provision staff accounts with roles, and provide temporary credentials and a setup link; staff setup links expire after seven days and staff must choose a new password. A user can own or belong to multiple farms; the selected farm controls the dashboard, batch list, daily records, revenue ledger, and farm-scoped operations. New batch IDs are generated as `BAT-` plus eight random uppercase letters/numbers (12 characters total); existing batch IDs are retained. Batch and daily-record tables provide detail actions, and table actions use high-contrast green styling. The Revenue screen filters sales and adjustment entries by date, batch, payment status, and buyer; authorized users can record sales and append dated payments, which are linked to cashbook income automatically. Payment records include their exact creation time; payment history and sale/payment receipts display recorded timestamps in East Africa Time to the second. Blank payment references receive a random ten-character uppercase hexadecimal reference, displayed as `Reference: 0D4E7C3D1F`. Sale and payment transactions can be opened from the ledger and payment history to review their details. Farm owners and managers can download or print browser-generated PDF receipts for sales and individual payments, including existing ledger records. The selected farm is restored after refresh when the user still has access. Daily logs are unique per batch/date; farm owners/managers can update an existing log, with changes audited. Sign-up follows the Supabase project's email-confirmation setting. Public sign-ups require custom SMTP (or a Send Email hook) in Supabase: the built-in Auth sender only emails organization team members and allows two messages per hour. Forms submit to the authenticated API routes below; farm data access remains enforced by database RLS.
 
@@ -24,7 +24,7 @@ The deployment target is Vercel with a separate production Supabase project and 
 
 ## API
 
-Except for the public active-plan catalog, data endpoints require a signed-in Supabase user. Farm-scoped requests take a UUID `farmId`; database policies enforce membership and roles.
+Farm-scoped data endpoints require a signed-in Supabase user and take a UUID `farmId`; database policies enforce membership and roles. The subscription catalog and management APIs are dormant and do not expose plan data.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -34,10 +34,10 @@ Except for the public active-plan catalog, data endpoints require a signed-in Su
 | GET | `/api/auth/session` | Check whether the current visitor is signed in |
 | GET | `/api/farms` | List all farms the signed-in user belongs to |
 | POST | `/api/farms` | Create another farm with optional opening cash balance; creator becomes its owner |
-| GET | `/api/subscription-plans` | Public read of active subscription plans and configured KES prices |
-| GET, POST | `/api/farms/:farmId/subscription` | Read farm entitlements or start its one-time Professional trial (owner-only trial start) |
-| GET | `/api/farms/:farmId/subscription/usage` | Read authenticated farm subscription usage; membership is checked by the database |
-| POST | `/api/farms/:farmId/subscription/cancel` | Schedule owner-only cancellation at the current trial or billing-period end |
+| GET | `/api/subscription-plans` | Returns 410 while subscription functionality is dormant |
+| GET, POST | `/api/farms/:farmId/subscription` | Returns 410 while dormant; authentication remains required |
+| GET | `/api/farms/:farmId/subscription/usage` | Returns 410 while dormant; authentication remains required |
+| POST | `/api/farms/:farmId/subscription/cancel` | Returns 410 while dormant; authentication remains required |
 | GET, POST, PATCH, DELETE | `/api/farms/:farmId/members` | Manage farm membership and roles (owner-only changes) |
 | GET, POST | `/api/farms/:farmId/invitations` | List invitations or provision a staff account (owner only) |
 | POST | `/api/invitations/accept` | Accept pending farm invitations for the signed-in user |
@@ -88,14 +88,13 @@ New batch IDs are generated and read-only when creating a batch. They use `BAT-`
 
 ## Project status and roadmap
 
-### Subscription foundation S1 (implemented; isolated-test database verified)
+### Subscription and licensing functionality (dormant)
 
-- `202611240001_subscription_foundation.sql` adds the plan catalog, feature/limit configuration, KES price records, farm subscriptions, payment/invoice/event history, webhook deduplication and usage measurements. New farms receive a Starter subscription; existing farms are backfilled.
-- The database-backed API exposes active plans, farm entitlements, the one-time 14-day no-card Professional trial and owner-scheduled cancellation. Staff can read their farm entitlements; only owners can manage the trial/cancellation lifecycle.
-- Professional/Enterprise prices remain unset until approved. No checkout, payment provider, client-side successful-payment action or production database deployment is included.
-- `past_due` resolves to Starter immediately. `grace_period` retains its plan through `current_period_end`; overdue grace/past-due subscriptions then fall back to Starter when entitlements are next read. Trial expiry and scheduled cancellation are also processed on entitlement reads, preserving farm records and membership.
-- `evaluateSubscriptionLimit` is a backend helper only. Existing resource-creation routes are not yet atomically quota-gated, so plan limits must not be treated as enforced until those writes use a database reservation/atomic check.
-- Subscription event history is append-only and retained: foreign keys intentionally prevent deleting a farm/subscription while related audit events remain. No farm-delete workflow exists.
+- Historical plan, farm subscription, payment, invoice, event, webhook, and usage structures remain intact. New farms continue to receive their existing Starter history record; this does not control farm access.
+- Migration `202611270001_subscription_deactivation.sql` adds a private, default-off `subscription_enforcement_config` switch. When off, database quota RPCs return unlimited quota entitlements without reading or changing subscription status/history. Authentication, membership, role, active-farm, and lifecycle checks remain in their existing RPCs.
+- Batch, staff-seat, and plan-feature helper checks in the application no longer enforce subscription limits. Subscription APIs return 410 and the pricing/billing screens are hidden from normal navigation.
+- No farms, accounts, memberships, batches, financial records, or subscription history are deleted or canceled by this migration. It has not been applied to production.
+- To reactivate licensing in a reviewed release, set `SUBSCRIPTIONS_ENABLED` to `true` in `src/lib/subscriptions/config.ts` and set `subscription_enforcement_config.enabled` to `true` using a trusted database administrator/service-role connection. Both controls must be enabled together; then redeploy the application.
 - The S1 migration was applied transactionally to the confirmed isolated test database on 24 Nov 2026; it was not applied to production. Its rollback-only SQL integration test passed there. That database has no `supabase_migrations.schema_migrations` history table, so its earlier migration state is not tracked by the Supabase CLI. Reconcile the baseline before using `supabase db push` against that database.
 - On 25 Nov 2026, all 13 migrations in `supabase/migrations` were applied in filename order to a newly configured, verified-empty test Supabase project. Migration versions were recorded in `supabase_migrations.schema_migrations`; the rollback-only subscription integration suite passed, and no fixture users/farms were retained. This did not modify production.
 - Run `psql $env:DATABASE_URL --set ON_ERROR_STOP=1 --file "tests\subscription-foundation.sql"` only against an isolated test database after applying the migrations. The script runs in a transaction and rolls back its fixture users and farms.

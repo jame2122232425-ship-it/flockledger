@@ -66,6 +66,10 @@ insert into public.farm_memberships (farm_id, user_id, role)
 values ('__FARM_ID__', '__OWNER_ID__', 'owner'),
        ('__FARM_ID__', '__STAFF_ID__', 'attendant');
 
+update public.subscription_enforcement_config
+set enabled = true
+where singleton;
+
 select set_config('request.jwt.claim.sub', '__OWNER_ID__', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 set local role authenticated;
@@ -254,6 +258,9 @@ delete from public.farms where id = '__FARM_ID__'::uuid;
 alter table public.farm_memberships enable trigger user;
 alter table public.batches enable trigger user;
 delete from auth.users where id in ('__OWNER_ID__'::uuid, '__STAFF_ID__'::uuid);
+update public.subscription_enforcement_config
+set enabled = false
+where singleton;
 commit;
 '@
     $cleanupSql = $cleanupSql.Replace("__BATCH_TRIGGER__", $batchTrigger)

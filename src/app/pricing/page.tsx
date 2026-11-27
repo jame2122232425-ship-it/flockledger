@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import MarketingPage from "@/components/marketing-pages";
+import { SUBSCRIPTIONS_ENABLED } from "@/lib/subscriptions/config";
 
 export const metadata: Metadata = {
   title: "Pricing | FlockLedger",
@@ -7,5 +9,6 @@ export const metadata: Metadata = {
 };
 
 export default function PricingPage() {
+  if (!SUBSCRIPTIONS_ENABLED) redirect("/");
   return <MarketingPage page="pricing" />;
 }

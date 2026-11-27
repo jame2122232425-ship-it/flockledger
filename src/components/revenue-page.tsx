@@ -24,6 +24,7 @@ type RevenueSummary = {
   sales_kes: number;
   received_kes: number;
   outstanding_kes: number;
+  unreconciled_paid_kes: number;
   sale_count: number;
 };
 
@@ -55,7 +56,8 @@ export function RevenuePage({
   farmName,
   batches,
   loadingBatches,
-  canRecord,
+  canCreateSales,
+  canRecordPayments,
   canDownloadReceipts,
   onFeedback,
 }: {
@@ -63,7 +65,8 @@ export function RevenuePage({
   farmName: string;
   batches: FarmBatch[];
   loadingBatches: boolean;
-  canRecord: boolean;
+  canCreateSales: boolean;
+  canRecordPayments: boolean;
   canDownloadReceipts: boolean;
   onFeedback: (message: string) => void;
 }) {
@@ -80,6 +83,7 @@ export function RevenuePage({
     sales_kes: 0,
     received_kes: 0,
     outstanding_kes: 0,
+    unreconciled_paid_kes: 0,
     sale_count: 0,
   });
   const [loading, setLoading] = useState(true);
@@ -156,7 +160,7 @@ export function RevenuePage({
     : "";
   const displayError = dateRangeError || error;
   const visibleSummary = dateRangeError
-    ? { sales_kes: 0, received_kes: 0, outstanding_kes: 0, sale_count: 0 }
+    ? { sales_kes: 0, received_kes: 0, outstanding_kes: 0, unreconciled_paid_kes: 0, sale_count: 0 }
     : summary;
 
   useEffect(() => {
@@ -201,7 +205,7 @@ export function RevenuePage({
       }).catch((loadError: unknown) => {
         if (!active || currentRequestId !== requestId.current) return;
         setRows([]);
-        setSummary({ sales_kes: 0, received_kes: 0, outstanding_kes: 0, sale_count: 0 });
+        setSummary({ sales_kes: 0, received_kes: 0, outstanding_kes: 0, unreconciled_paid_kes: 0, sale_count: 0 });
         setPagination({ page: 1, pageSize: 25, total: 0, pageCount: 0, hasMore: false, nextCursor: null });
         setError(loadError instanceof Error ? loadError.message : "Could not load revenue.");
       }).finally(() => {
@@ -584,16 +588,21 @@ export function RevenuePage({
           className="button button-primary"
           type="button"
           onClick={openSaleDialog}
-          disabled={!canRecord || loadingBatches || !runningBatches.length}
+          disabled={!canCreateSales || loadingBatches || !runningBatches.length}
           title={!runningBatches.length ? "Create a running batch before recording sales." : undefined}
         >
           Record sale
         </button>
       </div>
 
-      {!canRecord && (
+      {!canCreateSales && !canRecordPayments && (
         <div className="revenue-permission-note">
-          You can view revenue and payment history. Owners, managers, and accountants can record sales and payments.
+          You can view revenue and payment history but cannot record financial transactions.
+        </div>
+      )}
+      {canCreateSales && !canRecordPayments && (
+        <div className="revenue-permission-note">
+          You can record sales. Only owners and accountants can record payments.
         </div>
       )}
 
@@ -602,6 +611,12 @@ export function RevenuePage({
         <Metric icon="cash" label="Received" value={formatKes(visibleSummary.received_kes)} note="Payments recorded for these sales" tone="green" />
         <Metric icon="cash" label="Outstanding" value={formatKes(visibleSummary.outstanding_kes)} note="Remaining customer balances" tone="blue" />
       </section>
+      {visibleSummary.unreconciled_paid_kes !== 0 && (
+        <div className="notice" role="status">
+          Unreconciled historical paid adjustments: <strong>{formatKes(visibleSummary.unreconciled_paid_kes)}</strong>.
+          This amount is excluded from received cash and outstanding balances until reviewed.
+        </div>
+      )}
 
       <section className="content-card revenue-filter-card" aria-label="Revenue filters">
         <div className="revenue-filter-grid">
@@ -641,7 +656,7 @@ export function RevenuePage({
                       <td>{formatKes(sale.paid_kes)}</td>
                       <td className={sale.outstanding_kes > 0 ? "revenue-due-value" : ""}>{formatKes(sale.outstanding_kes)}</td>
                       <td><span className={`revenue-status-pill ${sale.payment_status}`}>{sale.payment_status === "partial" ? "Partial" : sale.payment_status}</span>{sale.is_adjustment && <span className="revenue-adjustment-tag">Adjustment</span>}</td>
-                      <td><div className="revenue-row-actions">{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openSaleDetails(sale)}>Details</button>}{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>}{canDownloadReceipts && !sale.is_adjustment && <><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptDownload(sale)}>PDF</button><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptPrint(sale)}>Print</button></>}{canRecord && !sale.is_adjustment && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div></td>
+                      <td><div className="revenue-row-actions">{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openSaleDetails(sale)}>Details</button>}{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>}{canDownloadReceipts && !sale.is_adjustment && <><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptDownload(sale)}>PDF</button><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptPrint(sale)}>Print</button></>}{canRecordPayments && !sale.is_adjustment && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div></td>
                     </tr>
                   ))}
                 </tbody>
@@ -664,7 +679,7 @@ export function RevenuePage({
                     <span>{formatNumber(sale.birds_sold)} birds · {formatNumber(sale.total_weight_kg, 2)} kg</span>
                     {!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openSaleDetails(sale)}>Sale details</button>}
                     {!sale.is_adjustment && canDownloadReceipts && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptDownload(sale)}>PDF</button><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptPrint(sale)}>Print</button></div>}
-                    {!sale.is_adjustment && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>{canRecord && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div>}
+                    {!sale.is_adjustment && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>{canRecordPayments && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div>}
                   </div>
                 </article>
               ))}
@@ -676,7 +691,7 @@ export function RevenuePage({
             <strong>{displayError ? "Revenue could not be loaded" : "No sales in this view"}</strong>
             <p>{displayError ? "Check your connection and try again." : "Try changing the filters or record a sale for a running batch."}</p>
             {displayError && <button className="revenue-action-link primary" type="button" onClick={() => setRefreshKey((current) => current + 1)}>Try again</button>}
-            {!displayError && canRecord && runningBatches.length > 0 && <button className="button button-primary" type="button" onClick={openSaleDialog}>Record sale</button>}
+            {!displayError && canCreateSales && runningBatches.length > 0 && <button className="button button-primary" type="button" onClick={openSaleDialog}>Record sale</button>}
           </div>
         )}
         {!dateRangeError && !loading && rows.length > 0 && (
@@ -738,7 +753,7 @@ export function RevenuePage({
             </section>
             {paymentError && <p className="inline-error" role="alert">{paymentError}</p>}
             {receiptError && <p className="inline-error" role="alert">{receiptError}</p>}
-            {canRecord && paymentSale.outstanding_kes > 0 && (
+            {canRecordPayments && paymentSale.outstanding_kes > 0 && (
               <form className="form-stack payment-entry-form" onSubmit={handlePaymentCreate}>
                 <h3>Record a payment</h3>
                 <div className="form-grid">

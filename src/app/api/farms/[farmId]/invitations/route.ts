@@ -18,7 +18,7 @@ import {
 
 const invitationSchema = z.object({
   email: z.email().transform((email) => email.trim().toLowerCase()),
-  role: z.enum(["manager", "attendant", "accountant", "veterinarian"]),
+  role: z.enum(["manager", "attendant", "accountant", "veterinarian", "inventory_officer"]),
   fullName: z.string().trim().min(1).max(128).optional(),
   password: z.string().min(8).max(128),
 });
