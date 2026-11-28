@@ -701,11 +701,12 @@ export default function FlockLedgerApp({
   async function handleInviteMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!activeFarm || activeFarm.role !== "owner") return;
+    const formElement = event.currentTarget;
     setTeamError("");
     setTeamNotice("");
     setTeamSetupLink("");
     setTeamTemporaryPassword("");
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     setBusy(true);
     const idempotencyKey = invitationIdempotencyKey.current ?? crypto.randomUUID();
     invitationIdempotencyKey.current = idempotencyKey;
@@ -724,7 +725,7 @@ export default function FlockLedgerApp({
         },
       );
       invitationIdempotencyKey.current = null;
-      event.currentTarget.reset();
+      formElement.reset();
       setTeamSetupLink(result.data.setupUrl ?? "");
       setTeamTemporaryPassword(result.data.temporaryPassword ?? "");
       setTeamNotice("Staff account created. Send the setup link and temporary password securely.");
