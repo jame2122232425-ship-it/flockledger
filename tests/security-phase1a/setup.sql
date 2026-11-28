@@ -64,3 +64,6 @@ stable
 as $$
   select nullif(current_setting('request.jwt.claim.role', true), '');
 $$;
+
+grant usage on schema auth to anon, authenticated, service_role;
+grant execute on function auth.uid(), auth.role() to anon, authenticated, service_role;

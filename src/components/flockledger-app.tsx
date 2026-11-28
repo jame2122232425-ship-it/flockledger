@@ -36,6 +36,10 @@ const AuditPage = dynamic(
   () => import("@/components/audit-page").then((module) => module.AuditPage),
   { loading: () => <div className="empty-inline">Loading audit history…</div> },
 );
+const HealthIncidentsPage = dynamic(
+  () => import("@/components/health-incidents-page").then((module) => module.HealthIncidentsPage),
+  { loading: () => <div className="empty-inline">Loading health incidents…</div> },
+);
 const PlatformAdminPage = dynamic(
   () => import("@/components/platform-admin-page").then((module) => module.PlatformAdminPage),
   { loading: () => <div className="empty-inline">Loading platform controls…</div> },
@@ -61,6 +65,20 @@ type FarmApplication = {
   decided_at: string | null;
 };
 
+type PermissionDelegation = {
+  id: string;
+  user_id: string;
+  permission_key: string;
+  revoked_at: string | null;
+};
+
+const DELEGABLE_MANAGER_PERMISSIONS = [
+  ["staff.invite", "Invite eligible staff"],
+  ["staff.assign_roles", "Assign eligible staff roles"],
+  ["inventory.adjust", "Adjust inventory"],
+  ["reports.export", "Export reports"],
+] as const;
+
 type Tab = AppTab;
 const TAB_CHANGE_EVENT = "flockledger-tab-change";
 const ACTIVE_FARM_STORAGE_KEY = "flockledger:active-farm-id";
@@ -76,7 +94,7 @@ function subscribeToTabChanges(onChange: () => void) {
 
 function getTabFromLocation(): Tab {
   const tab = new URLSearchParams(window.location.search).get("tab");
-  return tab === "batches" || tab === "daily" || tab === "revenue" || tab === "audit"
+  return tab === "batches" || tab === "daily" || tab === "health" || tab === "revenue" || tab === "audit"
     || tab === "platform"
     ? tab
     : "overview";
@@ -237,6 +255,10 @@ export default function FlockLedgerApp({
   const [farmError, setFarmError] = useState("");
   const [teamMembers, setTeamMembers] = useState<Array<{ user_id: string; role: string; created_at: string; profiles?: { full_name: string | null } | null }>>([]);
   const [teamInvitations, setTeamInvitations] = useState<Array<{ id: string; email: string; role: string; status: string }>>([]);
+  const [permissionDelegations, setPermissionDelegations] = useState<PermissionDelegation[]>([]);
+  const [delegationManagerId, setDelegationManagerId] = useState("");
+  const [delegationPermissions, setDelegationPermissions] = useState<string[]>([]);
+  const [farmPermissionState, setFarmPermissionState] = useState<{ farmId: string; permissions: string[] } | null>(null);
   const [teamError, setTeamError] = useState("");
   const [teamNotice, setTeamNotice] = useState("");
   const [teamSetupLink, setTeamSetupLink] = useState("");
@@ -382,12 +404,45 @@ export default function FlockLedgerApp({
     && Boolean(dailyRecordLookup.error);
   const farmIsActive = activeFarm?.lifecycle_status === "active";
   const canViewAudit = activeFarm?.role === "owner";
-  const canEditRecords = farmIsActive && (activeFarm?.role === "owner" || activeFarm?.role === "manager");
-  const canCreateBatches = canEditRecords;
+  const isFarmOwner = activeFarm?.role === "owner";
+  const farmPermissions = farmPermissionState?.farmId === farmId ? farmPermissionState.permissions : [];
+  const hasPermission = (permission: string) => isFarmOwner || farmPermissions.includes(permission);
+  const canViewTeam = hasPermission("staff.view");
+  const canInviteStaff = farmIsActive && hasPermission("staff.invite");
+  const canAssignRoles = farmIsActive && hasPermission("staff.assign_roles");
+  const canEditRecords = farmIsActive && hasPermission("production.record");
+  const canCreateBatches = farmIsActive && hasPermission("batches.create");
+  const canViewFinance = hasPermission("finance.view");
+  const canViewSales = hasPermission("sales.view") || canViewFinance;
+  const canCreateSales = farmIsActive && hasPermission("finance.sales.create");
+  const canRecordPayments = farmIsActive && hasPermission("finance.payments.record");
+  const canViewHealth = hasPermission("health.view");
+  const canCoordinateHealth = farmIsActive && hasPermission("health.coordinate");
   const batchNames = useMemo(() => new Map([
     ...batches.map((batch) => [batch.batch_id, batch.batch_code] as const),
     ...farmBatches.map((batch) => [batch.id, batch.batch_code] as const),
   ]), [batches, farmBatches]);
+
+  useEffect(() => {
+    if (authenticated !== true || !farmId) {
+      return;
+    }
+
+    let active = true;
+    request<{ data: string[] }>(`/api/farms/${encodeURIComponent(farmId)}/permissions`)
+      .then((result) => {
+        if (active) setFarmPermissionState({ farmId, permissions: result.data });
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setFarmPermissionState({ farmId, permissions: [] });
+        setPageError(error instanceof Error ? error.message : "Could not load farm permissions.");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [authenticated, farmId]);
 
   useEffect(() => {
     if (dialog !== "daily" || !farmId || !dailyBatchId || !dailyRecordDate) return;
@@ -431,8 +486,8 @@ export default function FlockLedgerApp({
       setFeedback("Only a farm owner can create or add another farm.");
       return;
     }
-    if (nextDialog === "team" && activeFarm?.role !== "owner") {
-      setFeedback("Only a farm owner can manage the team.");
+    if (nextDialog === "team" && !canViewTeam) {
+      setFeedback("Your farm role does not include team access.");
       return;
     }
     if (nextDialog === "daily") {
@@ -676,21 +731,33 @@ export default function FlockLedgerApp({
   }
 
   async function loadTeam() {
-    if (!activeFarm || activeFarm.role !== "owner") return;
+    if (!activeFarm || !canViewTeam) return;
     setTeamError("");
     setTeamNotice("");
     setBusy(true);
     try {
-      const [membersResult, invitationsResult] = await Promise.all([
-        requestAllPages<{ user_id: string; role: string; created_at: string }>(
-          `${window.location.origin}/api/farms/${encodeURIComponent(activeFarm.id)}/members`,
-        ),
-        requestAllPages<{ id: string; email: string; role: string; status: string }>(
+      const membersResult = await requestAllPages<{ user_id: string; role: string; created_at: string }>(
+        `${window.location.origin}/api/farms/${encodeURIComponent(activeFarm.id)}/members`,
+      );
+      const invitationsResult = canInviteStaff
+        ? await requestAllPages<{ id: string; email: string; role: string; status: string }>(
           `${window.location.origin}/api/farms/${encodeURIComponent(activeFarm.id)}/invitations`,
-        ),
-      ]);
+        )
+        : [];
       setTeamMembers(membersResult);
       setTeamInvitations(invitationsResult);
+      if (isFarmOwner) {
+        const { data: delegationData } = await request<{ data: PermissionDelegation[] }>(
+          `/api/farms/${encodeURIComponent(activeFarm.id)}/permission-delegations`,
+        );
+        setPermissionDelegations(delegationData);
+        const firstManager = membersResult.find((member) => member.role === "manager")?.user_id ?? "";
+        setDelegationManagerId((current) => current || firstManager);
+        const selectedManager = delegationManagerId || firstManager;
+        setDelegationPermissions(delegationData
+          .filter((entry) => entry.user_id === selectedManager && !entry.revoked_at)
+          .map((entry) => entry.permission_key));
+      }
     } catch (error) {
       setTeamError(error instanceof Error ? error.message : "Could not load team details.");
     } finally {
@@ -698,9 +765,30 @@ export default function FlockLedgerApp({
     }
   }
 
+  async function handleSaveManagerPermissions() {
+    if (!activeFarm || !isFarmOwner || !delegationManagerId) return;
+    setTeamError("");
+    setTeamNotice("");
+    setBusy(true);
+    try {
+      await request(`/api/farms/${encodeURIComponent(activeFarm.id)}/permission-delegations`, {
+        method: "PUT",
+        body: JSON.stringify({
+          managerUserId: delegationManagerId,
+          permissions: delegationPermissions,
+        }),
+      });
+      setTeamNotice("Manager permissions updated.");
+      await loadTeam();
+    } catch (error) {
+      setTeamError(error instanceof Error ? error.message : "Could not update manager permissions.");
+      setBusy(false);
+    }
+  }
+
   async function handleInviteMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!activeFarm || activeFarm.role !== "owner") return;
+    if (!activeFarm || !canInviteStaff) return;
     const formElement = event.currentTarget;
     setTeamError("");
     setTeamNotice("");
@@ -745,7 +833,7 @@ export default function FlockLedgerApp({
   }
 
   async function handleUpdateMemberRole(userId: string, role: "manager" | "attendant" | "accountant" | "veterinarian" | "inventory_officer" | "owner") {
-    if (!activeFarm || activeFarm.role !== "owner") return;
+    if (!activeFarm || !canAssignRoles) return;
     setTeamError("");
     setTeamNotice("");
     setBusy(true);
@@ -763,7 +851,7 @@ export default function FlockLedgerApp({
   }
 
   async function handleRemoveMember(userId: string) {
-    if (!activeFarm || activeFarm.role !== "owner") return;
+    if (!activeFarm || !isFarmOwner) return;
     setTeamError("");
     setTeamNotice("");
     setBusy(true);
@@ -967,6 +1055,8 @@ export default function FlockLedgerApp({
       ? "Flock batches"
       : tab === "daily"
         ? "Daily records"
+        : tab === "health"
+          ? "Health incidents"
         : tab === "revenue"
           ? "Revenue"
           : tab === "audit"
@@ -999,7 +1089,8 @@ export default function FlockLedgerApp({
             ["overview", "Overview", "overview"],
             ["batches", "Flock batches", "batch"],
             ["daily", "Daily records", "daily"],
-            ["revenue", "Revenue", "sales"],
+            ...(canViewHealth ? [["health", "Health incidents", "health"] as const] : []),
+            ...(canViewSales ? [["revenue", "Revenue", "sales"] as const] : []),
             ...(canViewAudit ? [["audit", "Audit history", "sales"] as const] : []),
             ...(isPlatformAdmin ? [["platform", "Platform administration", "billing"] as const] : []),
           ] as const).map(([id, label, icon]) => (
@@ -1017,7 +1108,7 @@ export default function FlockLedgerApp({
               {id === "batches" && runningBatches.length > 0 && <span className="nav-count" aria-label={`${runningBatches.length} active batches`}>{runningBatches.length}</span>}
             </button>
           ))}
-          {activeFarm?.role === "owner" && (
+          {canViewTeam && (
             <button
               className="nav-link"
               type="button"
@@ -1078,9 +1169,10 @@ export default function FlockLedgerApp({
               </button>
             ) : null}
             <MobileAccountMenu
-              isOwner={activeFarm?.role === "owner"}
+              canViewTeam={canViewTeam}
               busy={busy}
               extraLinks={[
+                ...(canViewHealth ? [{ label: "Health incidents", onClick: () => navigateToTab("health") }] : []),
                 ...(canViewAudit && activeFarm ? [{ label: "Audit history", onClick: () => navigateToTab("audit") }] : []),
                 ...(isPlatformAdmin ? [{ label: "Platform administration", onClick: () => navigateToTab("platform") }] : []),
               ]}
@@ -1136,25 +1228,33 @@ export default function FlockLedgerApp({
               dailyRecords={dailyRecords}
               batchNames={batchNames}
               loading={loadingDashboard}
+              canViewFinance={canViewFinance}
               onTabChange={navigateToTab}
               onAddDaily={() => openDialog("daily")}
             />
           ) : tab === "batches" ? (
-            <BatchesPage key={farmId} farmId={farmId} initialDashboard={dashboard} loading={loadingDashboard} canCreate={canCreateBatches} onAdd={() => openDialog("batch")} />
+            <BatchesPage key={farmId} farmId={farmId} initialDashboard={dashboard} loading={loadingDashboard} canCreate={canCreateBatches} canViewFinance={canViewFinance} onAdd={() => openDialog("batch")} />
           ) : tab === "daily" ? (
             <DailyPage key={farmId} farmId={farmId} batchNames={batchNames} refreshVersion={dailyRefreshVersion} onAdd={() => openDialog("daily")} />
+          ) : tab === "health" ? (
+            canViewHealth
+              ? <HealthIncidentsPage key={activeFarm.id} farmId={activeFarm.id} batches={farmBatches} canReport={canCoordinateHealth} />
+              : <section className="welcome-card"><h1>Health access is restricted</h1><p>Your farm role does not include access to health records.</p></section>
           ) : tab === "revenue" ? (
-            <RevenuePage
-              key={activeFarm.id}
-              farmId={activeFarm.id}
-              farmName={activeFarm.name}
-              batches={farmBatches}
-              loadingBatches={loadingDashboard}
-              canCreateSales={farmIsActive && ["owner", "manager", "accountant"].includes(activeFarm.role)}
-              canRecordPayments={farmIsActive && ["owner", "accountant"].includes(activeFarm.role)}
-              canDownloadReceipts={["owner", "manager", "accountant"].includes(activeFarm.role)}
-              onFeedback={setFeedback}
-            />
+            canViewSales ? (
+              <RevenuePage
+                key={activeFarm.id}
+                farmId={activeFarm.id}
+                farmName={activeFarm.name}
+                batches={farmBatches}
+                loadingBatches={loadingDashboard}
+                canCreateSales={canCreateSales}
+                canRecordPayments={canRecordPayments}
+                canViewPaymentHistory={canViewFinance}
+                canDownloadReceipts={canViewFinance}
+                onFeedback={setFeedback}
+              />
+            ) : <section className="welcome-card"><h1>Sales access is restricted</h1><p>Your farm role does not include access to sales records.</p></section>
           ) : tab === "audit" ? (
             canViewAudit
               ? <AuditPage key={activeFarm.id} farmId={activeFarm.id} role={activeFarm.role} />
@@ -1163,7 +1263,7 @@ export default function FlockLedgerApp({
         </div>
       </section>
 
-      <BottomTabs tab={tab} batchCount={runningBatches.length} onChange={navigateToTab} />
+      <BottomTabs tab={tab} batchCount={runningBatches.length} canViewSales={canViewSales} onChange={navigateToTab} />
 
       {dialog && (
         <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setDialog(null); }}>
@@ -1209,7 +1309,7 @@ export default function FlockLedgerApp({
                     <p>This link expires after 7 days and becomes inactive after password setup.</p>
                   </section>
                 )}
-                <form
+                {canInviteStaff ? <form
                   className="form-stack team-invite-form"
                   onSubmit={handleInviteMember}
                   onChange={() => { invitationIdempotencyKey.current = null; }}
@@ -1238,7 +1338,7 @@ export default function FlockLedgerApp({
                     <label>
                       Role
                       <select name="role" defaultValue="attendant">
-                        <option value="manager">Manager</option>
+                        {isFarmOwner && <option value="manager">Manager</option>}
                         <option value="attendant">Worker (Attendant)</option>
                         <option value="veterinarian">Veterinarian</option>
                         <option value="accountant">Accountant</option>
@@ -1249,7 +1349,48 @@ export default function FlockLedgerApp({
                   <button className="button button-primary" type="submit" disabled={busy}>
                     {busy ? "Please wait…" : "Invite team member"}
                   </button>
-                </form>
+                </form> : <p className="team-empty">Staff invitations are not included in your current farm permissions.</p>}
+
+                {isFarmOwner && teamMembers.some((member) => member.role === "manager") && (
+                  <section className="team-section">
+                    <div className="team-section-heading"><h3>Manager permissions</h3></div>
+                    <p className="dialog-description">Grant only these additional permissions. Managers cannot grant permissions or promote anyone to owner or manager.</p>
+                    <label>
+                      Manager
+                      <select
+                        value={delegationManagerId}
+                        onChange={(event) => {
+                          const userId = event.target.value;
+                          setDelegationManagerId(userId);
+                          setDelegationPermissions(permissionDelegations
+                            .filter((entry) => entry.user_id === userId && !entry.revoked_at)
+                            .map((entry) => entry.permission_key));
+                        }}
+                      >
+                        {teamMembers.filter((member) => member.role === "manager").map((manager) => (
+                          <option key={manager.user_id} value={manager.user_id}>{manager.user_id.slice(0, 8)}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="team-delegation-options">
+                      {DELEGABLE_MANAGER_PERMISSIONS.map(([permission, label]) => (
+                        <label key={permission}>
+                          <input
+                            type="checkbox"
+                            checked={delegationPermissions.includes(permission)}
+                            onChange={(event) => setDelegationPermissions((current) => event.target.checked
+                              ? [...current, permission]
+                              : current.filter((value) => value !== permission))}
+                          />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <button className="button button-secondary" type="button" onClick={() => void handleSaveManagerPermissions()} disabled={busy || !delegationManagerId}>
+                      {busy ? "Saving…" : "Save manager permissions"}
+                    </button>
+                  </section>
+                )}
 
                 <section className="team-section">
                   <div className="team-section-heading"><h3>Farm members</h3><span>{teamMembers.length}</span></div>
@@ -1265,7 +1406,7 @@ export default function FlockLedgerApp({
                           </div>
                           {member.role === "owner" ? (
                             <span className="team-owner-badge">Owner</span>
-                          ) : (
+                          ) : canAssignRoles && (isFarmOwner || member.role !== "manager") ? (
                             <div className="team-row-actions">
                               <select
                                 aria-label="Change member role"
@@ -1276,17 +1417,15 @@ export default function FlockLedgerApp({
                                 )}
                                 disabled={busy}
                               >
-                                <option value="manager">Manager</option>
+                                {isFarmOwner && <option value="manager">Manager</option>}
                                 <option value="attendant">Worker (Attendant)</option>
                                 <option value="veterinarian">Veterinarian</option>
                                 <option value="accountant">Accountant</option>
                                 <option value="inventory_officer">Inventory officer</option>
                               </select>
-                              <button type="button" onClick={() => void handleRemoveMember(member.user_id)} disabled={busy}>
-                                Remove
-                              </button>
+                              {isFarmOwner && <button type="button" onClick={() => void handleRemoveMember(member.user_id)} disabled={busy}>Remove</button>}
                             </div>
-                          )}
+                          ) : <span className="team-owner-badge">{member.role}</span>}
                         </div>
                       ))}
                     </div>
@@ -1408,6 +1547,7 @@ function Overview({
   dailyRecords,
   batchNames,
   loading,
+  canViewFinance,
   onTabChange,
   onAddDaily,
 }: {
@@ -1418,6 +1558,7 @@ function Overview({
   dailyRecords: DailyRecord[];
   batchNames: Map<string, string>;
   loading: boolean;
+  canViewFinance: boolean;
   onTabChange: (tab: Tab) => void;
   onAddDaily: () => void;
 }) {
@@ -1437,9 +1578,13 @@ function Overview({
       </div>
       <section className="metric-grid" aria-label="Farm metrics">
         <Metric icon="bird" label="Birds placed" value={formatNumber(summary?.birds_placed)} note={`${formatNumber(summary?.batches_recorded)} batches recorded`} tone="green" />
-        <Metric icon="cash" label="Cash balance" value={formatKes(summary?.cash_balance_kes)} note="Opening balance + cash activity" tone="blue" />
-        <Metric icon="sales" label="Revenue recorded" value={formatKes(summary?.revenue_kes)} note={`${formatKes(summary?.accounts_receivable_kes)} outstanding · View revenue`} tone="gold" onClick={() => onTabChange("revenue")} />
-        <Metric icon="feed" label="Feed on hand" value={`${formatNumber(summary?.feed_stock_on_hand_kg, 1)} kg`} note={`${formatNumber(summary?.total_expenses_kes)} KES total expenses`} tone="lilac" />
+        {canViewFinance && (
+          <>
+            <Metric icon="cash" label="Cash balance" value={formatKes(summary?.cash_balance_kes)} note="Opening balance + cash activity" tone="blue" />
+            <Metric icon="sales" label="Revenue recorded" value={formatKes(summary?.revenue_kes)} note={`${formatKes(summary?.accounts_receivable_kes)} outstanding · View revenue`} tone="gold" onClick={() => onTabChange("revenue")} />
+          </>
+        )}
+        <Metric icon="feed" label="Feed on hand" value={`${formatNumber(summary?.feed_stock_on_hand_kg, 1)} kg`} note={canViewFinance ? `${formatNumber(summary?.total_expenses_kes)} KES total expenses` : "Current inventory balance"} tone="lilac" />
       </section>
       <div className="content-grid">
         <section className="content-card batch-card">

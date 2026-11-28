@@ -58,6 +58,7 @@ export function RevenuePage({
   loadingBatches,
   canCreateSales,
   canRecordPayments,
+  canViewPaymentHistory = true,
   canDownloadReceipts,
   onFeedback,
 }: {
@@ -67,6 +68,7 @@ export function RevenuePage({
   loadingBatches: boolean;
   canCreateSales: boolean;
   canRecordPayments: boolean;
+  canViewPaymentHistory?: boolean;
   canDownloadReceipts: boolean;
   onFeedback: (message: string) => void;
 }) {
@@ -485,12 +487,14 @@ export function RevenuePage({
           </div>
         </div>
         <section className="content-card record-detail-card revenue-record-detail">
-          <div className="record-detail-status">
-            <span className={`revenue-status-pill ${sale.payment_status}`}>
-              {sale.payment_status === "partial" ? "Partial" : sale.payment_status}
-            </span>
-            {isPayment && <span className="revenue-status-pill paid">Payment received</span>}
-          </div>
+          {canViewPaymentHistory && (
+            <div className="record-detail-status">
+              <span className={`revenue-status-pill ${sale.payment_status}`}>
+                {sale.payment_status === "partial" ? "Partial" : sale.payment_status}
+              </span>
+              {isPayment && <span className="revenue-status-pill paid">Payment received</span>}
+            </div>
+          )}
           {isPayment && payment ? (
             <>
               <section className="record-detail-section">
@@ -530,20 +534,24 @@ export function RevenuePage({
                   <RevenueDetailField label="Recorded at (EAT)" value={dateTimeInNairobi(sale.created_at)} />
                   <RevenueDetailField label="Quantity sold" value={`${formatNumber(sale.birds_sold)} birds`} />
                   <RevenueDetailField label="Live weight" value={`${formatNumber(sale.total_weight_kg, 2)} kg`} />
-                  <RevenueDetailField label="Price basis" value={sale.price_basis ?? "—"} />
-                  <RevenueDetailField label="Price per unit" value={sale.price_kes === null ? "—" : formatKes(sale.price_kes)} />
+                  {canViewPaymentHistory && <>
+                    <RevenueDetailField label="Price basis" value={sale.price_basis ?? "—"} />
+                    <RevenueDetailField label="Price per unit" value={sale.price_kes === null ? "—" : formatKes(sale.price_kes)} />
+                  </>}
                   <RevenueDetailField label="Notes" value={sale.remarks ?? "—"} />
                 </dl>
               </section>
-              <section className="record-detail-section">
-                <h2>Payment summary</h2>
-                <dl className="record-detail-grid">
-                  <RevenueDetailField label="Sale total" value={formatKes(sale.amount_kes)} />
-                  <RevenueDetailField label="Amount received" value={formatKes(sale.paid_kes)} />
-                  <RevenueDetailField label="Outstanding balance" value={formatKes(sale.outstanding_kes)} />
-                </dl>
-                <button className="revenue-action-link primary" type="button" onClick={() => openPaymentDialog(sale)}>View payment history</button>
-              </section>
+              {canViewPaymentHistory && (
+                <section className="record-detail-section">
+                  <h2>Payment summary</h2>
+                  <dl className="record-detail-grid">
+                    <RevenueDetailField label="Sale total" value={formatKes(sale.amount_kes)} />
+                    <RevenueDetailField label="Amount received" value={formatKes(sale.paid_kes)} />
+                    <RevenueDetailField label="Outstanding balance" value={formatKes(sale.outstanding_kes)} />
+                  </dl>
+                  <button className="revenue-action-link primary" type="button" onClick={() => openPaymentDialog(sale)}>View payment history</button>
+                </section>
+              )}
             </>
           )}
           {canDownloadReceipts && (
@@ -582,7 +590,9 @@ export function RevenuePage({
         <div>
           <p className="eyebrow">SALES &amp; RECEIPTS</p>
           <h1>Revenue</h1>
-          <p className="page-subtitle">Track sales, customer payments, and outstanding balances.</p>
+          <p className="page-subtitle">{canViewPaymentHistory
+            ? "Track sales, customer payments, and outstanding balances."
+            : "Track sale records and production performance."}</p>
         </div>
         <button
           className="button button-primary"
@@ -595,23 +605,29 @@ export function RevenuePage({
         </button>
       </div>
 
-      {!canCreateSales && !canRecordPayments && (
+      {!canCreateSales && !canRecordPayments && canViewPaymentHistory && (
         <div className="revenue-permission-note">
           You can view revenue and payment history but cannot record financial transactions.
         </div>
       )}
-      {canCreateSales && !canRecordPayments && (
+      {canCreateSales && !canRecordPayments && canViewPaymentHistory && (
         <div className="revenue-permission-note">
           You can record sales. Only owners and accountants can record payments.
         </div>
       )}
 
       <section className="metric-grid revenue-summary-grid" aria-label="Revenue summary">
-        <Metric icon="sales" label="Sales" value={formatKes(visibleSummary.sales_kes)} note={`${formatNumber(visibleSummary.sale_count)} ${visibleSummary.sale_count === 1 ? "ledger entry" : "ledger entries"} in this view`} tone="gold" />
-        <Metric icon="cash" label="Received" value={formatKes(visibleSummary.received_kes)} note="Payments recorded for these sales" tone="green" />
-        <Metric icon="cash" label="Outstanding" value={formatKes(visibleSummary.outstanding_kes)} note="Remaining customer balances" tone="blue" />
+        {canViewPaymentHistory
+          ? <Metric icon="sales" label="Sales" value={formatKes(visibleSummary.sales_kes)} note={`${formatNumber(visibleSummary.sale_count)} ${visibleSummary.sale_count === 1 ? "ledger entry" : "ledger entries"} in this view`} tone="gold" />
+          : <Metric icon="sales" label="Sales recorded" value={formatNumber(visibleSummary.sale_count)} note="Sale transactions in this view" tone="gold" />}
+        {canViewPaymentHistory && (
+          <>
+            <Metric icon="cash" label="Received" value={formatKes(visibleSummary.received_kes)} note="Payments recorded for these sales" tone="green" />
+            <Metric icon="cash" label="Outstanding" value={formatKes(visibleSummary.outstanding_kes)} note="Remaining customer balances" tone="blue" />
+          </>
+        )}
       </section>
-      {visibleSummary.unreconciled_paid_kes !== 0 && (
+      {canViewPaymentHistory && visibleSummary.unreconciled_paid_kes !== 0 && (
         <div className="notice" role="status">
           Unreconciled historical paid adjustments: <strong>{formatKes(visibleSummary.unreconciled_paid_kes)}</strong>.
           This amount is excluded from received cash and outstanding balances until reviewed.
@@ -623,7 +639,7 @@ export function RevenuePage({
           <label>From<input type="date" value={filters.from} max={filters.to || undefined} onChange={(event) => updateFilter("from", event.target.value)} /></label>
           <label>To<input type="date" value={filters.to} min={filters.from || undefined} onChange={(event) => updateFilter("to", event.target.value)} /></label>
           <label>Batch<select value={filters.batchId} onChange={(event) => updateFilter("batchId", event.target.value)}><option value="">All batches</option>{batches.map((batch) => <option key={batch.id} value={batch.id}>{batch.batch_code}</option>)}</select></label>
-          <label>Payment status<select value={filters.paymentStatus} onChange={(event) => updateFilter("paymentStatus", event.target.value as RevenueFilters["paymentStatus"])}><option value="">All statuses</option><option value="paid">Paid</option><option value="partial">Partially paid</option><option value="unpaid">Unpaid</option></select></label>
+          {canViewPaymentHistory && <label>Payment status<select value={filters.paymentStatus} onChange={(event) => updateFilter("paymentStatus", event.target.value as RevenueFilters["paymentStatus"])}><option value="">All statuses</option><option value="paid">Paid</option><option value="partial">Partially paid</option><option value="unpaid">Unpaid</option></select></label>}
           <label className="revenue-search-field">Buyer<input type="search" maxLength={128} value={filters.search} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Search buyers" /></label>
           <button className="revenue-reset-button" type="button" onClick={resetFilters}>Reset filters</button>
         </div>
@@ -652,11 +668,11 @@ export function RevenuePage({
                       <td><span className="revenue-buyer-cell"><strong>{sale.customer}</strong><small>{sale.is_adjustment ? sale.remarks : sale.receipt_number || "Sale"}</small></span></td>
                       <td>{batchNames.get(sale.batch_id) ?? "—"}</td>
                       <td>{formatNumber(sale.birds_sold)} birds<small className="revenue-cell-secondary">{formatNumber(sale.total_weight_kg, 2)} kg</small></td>
-                      <td>{formatKes(sale.amount_kes)}</td>
-                      <td>{formatKes(sale.paid_kes)}</td>
-                      <td className={sale.outstanding_kes > 0 ? "revenue-due-value" : ""}>{formatKes(sale.outstanding_kes)}</td>
-                      <td><span className={`revenue-status-pill ${sale.payment_status}`}>{sale.payment_status === "partial" ? "Partial" : sale.payment_status}</span>{sale.is_adjustment && <span className="revenue-adjustment-tag">Adjustment</span>}</td>
-                      <td><div className="revenue-row-actions">{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openSaleDetails(sale)}>Details</button>}{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>}{canDownloadReceipts && !sale.is_adjustment && <><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptDownload(sale)}>PDF</button><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptPrint(sale)}>Print</button></>}{canRecordPayments && !sale.is_adjustment && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div></td>
+                      <td>{canViewPaymentHistory ? formatKes(sale.amount_kes) : ""}</td>
+                      <td>{canViewPaymentHistory ? formatKes(sale.paid_kes) : ""}</td>
+                      <td className={canViewPaymentHistory && sale.outstanding_kes > 0 ? "revenue-due-value" : ""}>{canViewPaymentHistory ? formatKes(sale.outstanding_kes) : ""}</td>
+                      <td>{canViewPaymentHistory && <><span className={`revenue-status-pill ${sale.payment_status}`}>{sale.payment_status === "partial" ? "Partial" : sale.payment_status}</span>{sale.is_adjustment && <span className="revenue-adjustment-tag">Adjustment</span>}</>}</td>
+                      <td><div className="revenue-row-actions">{!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openSaleDetails(sale)}>Details</button>}{canViewPaymentHistory && !sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>}{canDownloadReceipts && !sale.is_adjustment && <><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptDownload(sale)}>PDF</button><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptPrint(sale)}>Print</button></>}{canRecordPayments && !sale.is_adjustment && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div></td>
                     </tr>
                   ))}
                 </tbody>
@@ -667,19 +683,21 @@ export function RevenuePage({
                 <article className={`revenue-mobile-card ${sale.is_adjustment ? "adjustment" : ""}`} key={sale.id}>
                   <div className="revenue-mobile-card-top">
                     <div><strong>{sale.customer}</strong><small>{shortDate(sale.sale_date)} · {batchNames.get(sale.batch_id) ?? "Batch"}</small></div>
-                    <span className={`revenue-status-pill ${sale.payment_status}`}>{sale.payment_status === "partial" ? "Partial" : sale.payment_status}</span>
+                    {canViewPaymentHistory && <span className={`revenue-status-pill ${sale.payment_status}`}>{sale.payment_status === "partial" ? "Partial" : sale.payment_status}</span>}
                   </div>
                   {sale.is_adjustment && <p className="revenue-adjustment-reason">{sale.remarks}</p>}
                   <div className="revenue-mobile-values">
-                    <span><small>Sales</small><strong>{formatKes(sale.amount_kes)}</strong></span>
-                    <span><small>Received</small><strong>{formatKes(sale.paid_kes)}</strong></span>
-                    <span><small>Outstanding</small><strong className={sale.outstanding_kes > 0 ? "revenue-due-value" : ""}>{formatKes(sale.outstanding_kes)}</strong></span>
+                    {canViewPaymentHistory && <>
+                      <span><small>Sales</small><strong>{formatKes(sale.amount_kes)}</strong></span>
+                      <span><small>Received</small><strong>{formatKes(sale.paid_kes)}</strong></span>
+                      <span><small>Outstanding</small><strong className={sale.outstanding_kes > 0 ? "revenue-due-value" : ""}>{formatKes(sale.outstanding_kes)}</strong></span>
+                    </>}
                   </div>
                   <div className="revenue-mobile-card-bottom">
                     <span>{formatNumber(sale.birds_sold)} birds · {formatNumber(sale.total_weight_kg, 2)} kg</span>
                     {!sale.is_adjustment && <button type="button" className="revenue-action-link" onClick={() => openSaleDetails(sale)}>Sale details</button>}
                     {!sale.is_adjustment && canDownloadReceipts && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptDownload(sale)}>PDF</button><button type="button" className="revenue-action-link" onClick={() => void handleSaleReceiptPrint(sale)}>Print</button></div>}
-                    {!sale.is_adjustment && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>{canRecordPayments && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div>}
+                    {canViewPaymentHistory && !sale.is_adjustment && <div className="revenue-row-actions"><button type="button" className="revenue-action-link" onClick={() => openPaymentDialog(sale)}>Payments</button>{canRecordPayments && sale.outstanding_kes > 0 && <button type="button" className="revenue-action-link primary" onClick={() => openPaymentDialog(sale)}>Add payment</button>}</div>}
                   </div>
                 </article>
               ))}
@@ -715,7 +733,7 @@ export function RevenuePage({
                 <label><span className="revenue-field-label">Total live weight <small>kg</small></span><input name="totalWeightKg" type="number" min="0.001" step="0.001" required /></label>
                 <label>Price basis<select name="priceBasis" defaultValue="Bird"><option value="Bird">Per bird</option><option value="Kg">Per kilogram</option></select></label>
                 <label><span className="revenue-field-label">Price per unit <small>KES</small></span><input name="priceKes" type="number" min="0" step="0.01" required /></label>
-                <label><span className="revenue-field-label">Received now <small>KES · optional</small></span><input name="paidKes" type="number" min="0" step="0.01" defaultValue="0" /></label>
+                {canRecordPayments && <label><span className="revenue-field-label">Received now <small>KES · optional</small></span><input name="paidKes" type="number" min="0" step="0.01" defaultValue="0" /></label>}
                 <label>Receipt reference<input name="receiptNumber" maxLength={64} placeholder="Optional" /></label>
                 <label className="field-span">Notes<input name="remarks" maxLength={2000} placeholder="Optional sale details" /></label>
               </div>
@@ -726,7 +744,7 @@ export function RevenuePage({
         </div>
       )}
 
-      {paymentSale && (
+      {paymentSale && canViewPaymentHistory && (
         <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPaymentSale(null); }}>
           <section className="dialog-card revenue-dialog-card payment-dialog-card" role="dialog" aria-modal="true" aria-labelledby="payment-dialog-title">
             <div className="dialog-heading">

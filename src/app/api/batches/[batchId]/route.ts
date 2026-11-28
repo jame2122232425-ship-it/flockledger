@@ -8,9 +8,6 @@ type RouteContext = { params: Promise<{ batchId: string }> };
 const batchFields =
   "id, farm_id, batch_code, batch_type, rearing_system, house, date_placed, source, strain, chicks_ordered, chicks_received, date_sold_out, status, remarks, created_at, updated_at";
 
-const performanceFields =
-  "batch_id, live_weight_sold_kg, avg_live_weight_sold_kg, total_cost_kes, cost_per_bird_sold_kes, cost_per_kg_sold_kes, profit_kes, profit_per_bird_sold_kes, mortality_percent, livability_percent, age_days, epef, cash_in_kes, cash_out_kes, feed_consumed_kg, revenue_kes, paid_kes, outstanding_kes, birds_sold, dead, culled, fcr";
-
 export async function GET(request: NextRequest, context: RouteContext) {
   const { batchId } = await context.params;
   const parsedBatchId = z.string().uuid().safeParse(batchId);
@@ -24,6 +21,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
 
+    const { data: permissions, error: permissionsError } = await supabase.rpc(
+      "get_my_farm_permissions",
+      { p_farm_id: parsedFarmId.data },
+    );
+    if (permissionsError) {
+      if (permissionsError.code === "42501") return apiError("Farm membership required.", 403);
+      console.error("Failed to load batch permissions:", permissionsError.code);
+      return apiError("Could not load batch details.", 500);
+    }
+    const canViewFinance = (permissions ?? []).includes("finance.view");
     const [batchResult, performanceResult] = await Promise.all([
       supabase.from("batches")
         .select(batchFields)
@@ -31,7 +38,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         .eq("farm_id", parsedFarmId.data)
         .maybeSingle(),
       supabase.from("batch_performance")
-        .select(performanceFields)
+        .select("*")
         .eq("batch_id", parsedBatchId.data)
         .eq("farm_id", parsedFarmId.data)
         .maybeSingle(),
@@ -50,7 +57,24 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return apiError("Could not load batch details.", 500);
     }
 
-    return NextResponse.json({ data: { ...performanceResult.data, ...batchResult.data } });
+    const data = canViewFinance
+      ? { ...performanceResult.data, ...batchResult.data }
+      : {
+        batch_id: performanceResult.data.batch_id,
+        live_weight_sold_kg: performanceResult.data.live_weight_sold_kg,
+        avg_live_weight_sold_kg: performanceResult.data.avg_live_weight_sold_kg,
+        mortality_percent: performanceResult.data.mortality_percent,
+        livability_percent: performanceResult.data.livability_percent,
+        age_days: performanceResult.data.age_days,
+        epef: performanceResult.data.epef,
+        feed_consumed_kg: performanceResult.data.feed_consumed_kg,
+        birds_sold: performanceResult.data.birds_sold,
+        dead: performanceResult.data.dead,
+        culled: performanceResult.data.culled,
+        fcr: performanceResult.data.fcr,
+        ...batchResult.data,
+      };
+    return NextResponse.json({ data });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) {
       return apiError(error.message, 503);

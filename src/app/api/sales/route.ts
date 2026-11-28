@@ -38,19 +38,46 @@ export async function GET(request: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
 
-    const { data, error } = await supabase.rpc("get_revenue_ledger_page", {
-      p_farm_id: query.data.farmId,
-      p_batch_id: query.data.batchId ?? null,
-      p_from: query.data.from ?? null,
-      p_to: query.data.to ?? null,
-      p_payment_status: query.data.paymentStatus ?? null,
-      p_search: query.data.search?.trim() || null,
-      p_cursor_date: cursor?.saleDate ?? null,
-      p_cursor_created_at: cursor?.createdAt ?? null,
-      p_cursor_id: cursor?.id ?? null,
-      p_page_size: pagination.pageSize,
-    });
+    const { data: permissions, error: permissionsError } = await supabase.rpc(
+      "get_my_farm_permissions",
+      { p_farm_id: query.data.farmId },
+    );
+    if (permissionsError) {
+      if (permissionsError.code === "42501") return apiError("Farm membership required.", 403);
+      console.error("Failed to load sales permissions:", permissionsError.code);
+      return apiError("Could not load revenue details.", 500);
+    }
+    const canViewFinance = (permissions ?? []).includes("finance.view");
+    const canViewSales = (permissions ?? []).includes("sales.view");
+    if (!canViewFinance && !canViewSales) return apiError("Sales access is restricted.", 403);
+
+    const rpc = canViewFinance
+      ? supabase.rpc("get_revenue_ledger_page", {
+        p_farm_id: query.data.farmId,
+        p_batch_id: query.data.batchId ?? null,
+        p_from: query.data.from ?? null,
+        p_to: query.data.to ?? null,
+        p_payment_status: query.data.paymentStatus ?? null,
+        p_search: query.data.search?.trim() || null,
+        p_cursor_date: cursor?.saleDate ?? null,
+        p_cursor_created_at: cursor?.createdAt ?? null,
+        p_cursor_id: cursor?.id ?? null,
+        p_page_size: pagination.pageSize,
+      })
+      : supabase.rpc("get_operational_sales_page", {
+        p_farm_id: query.data.farmId,
+        p_batch_id: query.data.batchId ?? null,
+        p_from: query.data.from ?? null,
+        p_to: query.data.to ?? null,
+        p_search: query.data.search?.trim() || null,
+        p_cursor_date: cursor?.saleDate ?? null,
+        p_cursor_created_at: cursor?.createdAt ?? null,
+        p_cursor_id: cursor?.id ?? null,
+        p_page_size: pagination.pageSize,
+      });
+    const { data, error } = await rpc;
     if (error) {
+      if (error.code === "42501") return apiError("Sales access is restricted.", 403);
       console.error("Failed to load paginated revenue:", error.code);
       return apiError("Could not load revenue details.", 500);
     }

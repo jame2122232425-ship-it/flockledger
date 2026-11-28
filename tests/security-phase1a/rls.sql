@@ -445,8 +445,92 @@ values ('Farm A manager creates batch using quota-authorized RPC');
 
 do $$
 declare
+  sale_result jsonb;
+  operational_page jsonb;
+  sale_id uuid;
+  visible bigint;
   rejected boolean := false;
 begin
+  perform pg_temp.assert_true(
+    not public.has_farm_permission('20000000-0000-4000-8000-000000000001', 'finance.view'),
+    'Manager does not have farm-wide finance access'
+  );
+  perform pg_temp.assert_true(
+    not public.has_farm_permission('20000000-0000-4000-8000-000000000001', 'audit.view.full'),
+    'Manager cannot view farm audit logs'
+  );
+  perform pg_temp.assert_true(
+    public.has_farm_permission('20000000-0000-4000-8000-000000000001', 'sales.view'),
+    'Manager retains operational sales access'
+  );
+
+  sale_result := public.create_sale_idempotent(
+    '20000000-0000-4000-8000-000000000001',
+    '30000000-0000-4000-8000-000000000001',
+    '2026-01-04', 'Manager operational sale', 2, 5, 'Kg', 300, 0,
+    'P1A-MGR-RECEIPT', 'Manager visibility test', 'p1a-mgr-sale-0001'
+  );
+  sale_id := (sale_result ->> 'id')::uuid;
+  select count(*) into visible
+  from public.sales
+  where id = sale_id;
+  perform pg_temp.assert_true(
+    visible = 0,
+    'Manager cannot read financial sale rows directly'
+  );
+
+  operational_page := public.get_operational_sales_page(
+    '20000000-0000-4000-8000-000000000001'
+  );
+  perform pg_temp.assert_true(
+    operational_page -> 'summary' -> 'sales_kes' = '0'::jsonb
+    and operational_page -> 'data' -> 0 -> 'amount_kes' = '0'::jsonb
+    and operational_page -> 'data' -> 0 -> 'price_kes' = 'null'::jsonb,
+    'Operational sales response omits transaction amounts'
+  );
+
+  begin
+    perform public.create_sale_payment_idempotent(
+      '20000000-0000-4000-8000-000000000001', sale_id, '2026-01-05',
+      100, null, 'p1a-mgr-payment-0001'
+    );
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  perform pg_temp.assert_true(
+    rejected,
+    'Manager cannot record sale payments'
+  );
+
+  rejected := false;
+  begin
+    insert into public.health_records (
+      farm_id, batch_id, record_date, record_type, product_name,
+      birds_affected, created_by
+    ) values (
+      '20000000-0000-4000-8000-000000000001',
+      '30000000-0000-4000-8000-000000000001',
+      '2026-01-05', 'Treatment', 'Manager must not record treatment',
+      1, auth.uid()
+    );
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  perform pg_temp.assert_true(
+    rejected,
+    'Manager cannot create clinical health records'
+  );
+
+  insert into public.health_incidents (
+    farm_id, batch_id, incident_date, summary, observed_signs,
+    birds_affected, reported_by
+  ) values (
+    '20000000-0000-4000-8000-000000000001',
+    '30000000-0000-4000-8000-000000000001',
+    '2026-01-05', 'Operational health report', 'Reduced feed intake',
+    2, auth.uid()
+  );
+
   begin
     insert into public.farm_memberships (farm_id, user_id, role)
     values (
@@ -472,6 +556,102 @@ begin
   perform pg_temp.assert_true(rejected, 'Manager cannot promote self to owner');
 end;
 $$;
+
+do $$
+declare
+  rejected boolean := false;
+begin
+  begin
+    perform public.replace_manager_permission_delegations(
+      '20000000-0000-4000-8000-000000000001',
+      '10000000-0000-4000-8000-000000000003',
+      array['staff.invite']::text[]
+    );
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  perform pg_temp.assert_true(rejected, 'Manager cannot grant delegated permissions');
+end;
+$$;
+
+reset role;
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+set local role authenticated;
+
+select public.replace_manager_permission_delegations(
+  '20000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000003',
+  array['staff.invite', 'staff.assign_roles']::text[]
+);
+
+reset role;
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+set local role authenticated;
+
+select pg_temp.assert_true(
+  public.has_farm_permission('20000000-0000-4000-8000-000000000001', 'staff.invite')
+  and public.has_farm_permission('20000000-0000-4000-8000-000000000001', 'staff.assign_roles'),
+  'Owner delegation grants only configured Manager permissions'
+);
+
+select public.reserve_farm_staff_seat(
+  '20000000-0000-4000-8000-000000000001',
+  'delegated-attendant@example.invalid', 'attendant', 'Delegated employee',
+  repeat('5', 64), repeat('6', 64)
+);
+
+do $$
+declare
+  rejected boolean := false;
+begin
+  begin
+    perform public.update_farm_member_role(
+      '20000000-0000-4000-8000-000000000001',
+      '10000000-0000-4000-8000-000000000004',
+      'manager'
+    );
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  perform pg_temp.assert_true(rejected, 'Delegated Manager cannot assign the Manager role');
+
+  rejected := false;
+  begin
+    perform public.reserve_farm_staff_seat(
+      '20000000-0000-4000-8000-000000000001',
+      'another-manager@example.invalid', 'manager', null,
+      repeat('3', 64), repeat('4', 64)
+    );
+  exception when insufficient_privilege then
+    rejected := true;
+  end;
+  perform pg_temp.assert_true(rejected, 'Delegated Manager cannot invite another Manager');
+end;
+$$;
+
+reset role;
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+set local role authenticated;
+
+select public.replace_manager_permission_delegations(
+  '20000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000003',
+  array[]::text[]
+);
+
+reset role;
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+set local role authenticated;
+
+select pg_temp.assert_true(
+  not public.has_farm_permission('20000000-0000-4000-8000-000000000001', 'staff.invite')
+  and not public.has_farm_permission('20000000-0000-4000-8000-000000000001', 'staff.assign_roles'),
+  'Owner revocation immediately removes Manager delegations'
+);
 
 -- Accountants use authorized transaction RPCs; direct financial table writes are blocked.
 reset role;
@@ -592,9 +772,12 @@ declare
   request_id uuid;
   rejected boolean := false;
 begin
-  select id into sale_id from public.sales
-  where farm_id = '20000000-0000-4000-8000-000000000001'
-    and receipt_number = 'P1A-R1';
+  sale_id := (
+    public.get_operational_sales_page(
+      '20000000-0000-4000-8000-000000000001',
+      null, null, null, 'Manager operational sale'
+    ) -> 'data' -> 0 ->> 'id'
+  )::uuid;
   select (public.create_financial_correction_request(
     '20000000-0000-4000-8000-000000000001', 'sale_adjustment', sale_id,
     null, null, null, 0, 0, 50, null, 'Corrected sale amount',
@@ -863,7 +1046,7 @@ begin
       end;
       perform pg_temp.assert_true(
         rejected,
-        'Non-owner cannot list ' || audit_category || ' audit'
+        'Non-owner ' || user_id || ' cannot list ' || audit_category || ' audit'
       );
     end loop;
 
@@ -876,7 +1059,10 @@ begin
     exception when insufficient_privilege then
       rejected := true;
     end;
-    perform pg_temp.assert_true(rejected, 'Non-owner cannot export farm audit');
+    perform pg_temp.assert_true(
+      rejected,
+      'Non-owner ' || user_id || ' cannot export farm audit'
+    );
   end loop;
 end;
 $$;

@@ -96,12 +96,14 @@ export function BatchesPage({
   initialDashboard,
   loading,
   canCreate,
+  canViewFinance = true,
   onAdd,
 }: {
   farmId: string;
   initialDashboard: DashboardPayload | null;
   loading: boolean;
   canCreate: boolean;
+  canViewFinance?: boolean;
   onAdd: () => void;
 }) {
   const [filter, setFilter] = useState<"all" | "running" | "closed">("all");
@@ -218,13 +220,15 @@ export function BatchesPage({
           <DetailField label="Feed conversion ratio" value={(details ?? selectedBatch).fcr == null ? "—" : formatNumber((details ?? selectedBatch).fcr, 2)} />
           <DetailField label="EPEF" value={details?.epef == null ? "—" : formatNumber(details.epef, 1)} />
         </DetailSection>
-        <DetailSection title="Revenue">
-          <DetailField label="Sales" value={formatKes((details ?? selectedBatch).revenue_kes)} />
-          <DetailField label="Payments received" value={details ? formatKes(details.paid_kes) : "—"} />
-          <DetailField label="Outstanding" value={formatKes((details ?? selectedBatch).outstanding_kes)} />
-          <DetailField label="Total costs" value={details ? formatKes(details.total_cost_kes) : "—"} />
-          <DetailField label="Profit" value={details ? formatKes(details.profit_kes) : "—"} />
-        </DetailSection>
+        {canViewFinance && (
+          <DetailSection title="Revenue">
+            <DetailField label="Sales" value={formatKes((details ?? selectedBatch).revenue_kes)} />
+            <DetailField label="Payments received" value={details ? formatKes(details.paid_kes) : "—"} />
+            <DetailField label="Outstanding" value={formatKes((details ?? selectedBatch).outstanding_kes)} />
+            <DetailField label="Total costs" value={details ? formatKes(details.total_cost_kes) : "—"} />
+            <DetailField label="Profit" value={details ? formatKes(details.profit_kes) : "—"} />
+          </DetailSection>
+        )}
       </RecordDetailPage>
     );
   }

@@ -12,7 +12,6 @@ import {
 } from "@/lib/security";
 import {
   paginationMetadata,
-  paginationRange,
   parsePagination,
 } from "@/lib/api/pagination";
 
@@ -82,22 +81,19 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const supabase = await createSupabaseServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
-    const { from, to } = paginationRange(pagination);
-    const { data, error, count } = await supabase
-      .from("farm_invitations")
-      .select("id, email, role, status, created_at", { count: "exact" })
-      .eq("farm_id", farmId)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .range(from, to);
+    const { data, error } = await supabase.rpc("get_farm_staff_invitations", {
+      p_farm_id: farmId,
+    });
     if (error) {
-      if (error.code === "42501") return apiError("Only farm owners can view invitations.", 403);
+      if (error.code === "42501") return apiError("Staff invitation permission required.", 403);
       console.error("Failed to load invitations:", error.code);
       return apiError("Could not load invitations.", 500);
     }
+    const invitations = data ?? [];
+    const from = (pagination.page - 1) * pagination.pageSize;
     return NextResponse.json({
-      data,
-      pagination: paginationMetadata(count ?? 0, pagination),
+      data: invitations.slice(from, from + pagination.pageSize),
+      pagination: paginationMetadata(invitations.length, pagination),
     });
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Supabase is not configured")) return apiError(error.message, 503);
@@ -132,17 +128,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (limitError) return apiError("Staff provisioning is temporarily unavailable.", 503);
     if (!allowed) return apiError("Too many staff invitations. Try again later.", 429);
 
-    const { data: ownerMembership, error: ownerError } = await supabase
-      .from("farm_memberships")
-      .select("role")
-      .eq("farm_id", farmId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (ownerError) return apiError("Could not verify farm ownership.", 500);
-    if (ownerMembership?.role !== "owner") {
-      return apiError("Only farm owners can create staff accounts.", 403);
-    }
-
     const admin = createSupabaseAdminClient();
     const tempPassword = parsed.data.password;
     const { data: reservationData, error: reservationError } = await supabase.rpc(
@@ -171,7 +156,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         );
       }
       if (reservationError.code === "42501") {
-        return apiError("Only farm owners can reserve staff seats.", 403);
+        return apiError("Staff invitation permission required for this farm.", 403);
       }
       if (reservationError.code === "55000") {
         return apiError("The additional staff limit is unavailable. Contact support.", 503);
@@ -287,7 +272,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         code: error.code,
         reservationId: reservation.reservationId,
       });
-      if (error.code === "42501") return apiError("Only farm owners can invite staff.", 403);
+      if (error.code === "42501") return apiError("Staff invitation could not be finalized.", 403);
       return apiError("Could not create invitation.", 500);
     }
     const invitation = z.object({

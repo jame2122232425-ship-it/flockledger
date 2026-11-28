@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/app-icon";
 
-export type AppTab = "overview" | "batches" | "daily" | "revenue" | "audit" | "platform";
+export type AppTab = "overview" | "batches" | "daily" | "health" | "revenue" | "audit" | "platform";
 
 const primaryTabs = [
   { id: "overview", label: "Overview", icon: "overview" },
@@ -16,15 +16,17 @@ const primaryTabs = [
 export function BottomTabs({
   tab,
   batchCount,
+  canViewSales = true,
   onChange,
 }: {
   tab: AppTab;
   batchCount: number;
+  canViewSales?: boolean;
   onChange: (tab: AppTab) => void;
 }) {
   return (
     <nav className="bottom-tabs" aria-label="Mobile navigation">
-      {primaryTabs.map((item) => {
+      {primaryTabs.filter((item) => item.id !== "revenue" || canViewSales).map((item) => {
         const active = tab === item.id;
         return (
           <button
@@ -48,18 +50,21 @@ export function BottomTabs({
 }
 
 export function MobileAccountMenu({
+  canViewTeam,
   isOwner,
   busy,
   extraLinks = [],
   onTeam,
   onSignOut,
 }: {
-  isOwner: boolean;
+  canViewTeam?: boolean;
+  isOwner?: boolean;
   busy: boolean;
   extraLinks?: Array<{ label: string; onClick: () => void }>;
   onTeam: () => void;
   onSignOut: () => void;
 }) {
+  const canManageTeam = canViewTeam ?? isOwner ?? false;
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -104,7 +109,7 @@ export function MobileAccountMenu({
               {link.label}
             </button>
           ))}
-          {isOwner && (
+          {canManageTeam && (
             <button type="button" onClick={() => { close(); onTeam(); }}>
               Manage team
             </button>

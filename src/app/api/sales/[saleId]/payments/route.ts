@@ -34,6 +34,19 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
 
+    const { data: permissions, error: permissionsError } = await supabase.rpc(
+      "get_my_farm_permissions",
+      { p_farm_id: farmId.data },
+    );
+    if (permissionsError) {
+      if (permissionsError.code === "42501") return apiError("Farm membership required.", 403);
+      console.error("Failed to load payment permissions:", permissionsError.code);
+      return apiError("Could not load payment history.", 500);
+    }
+    if (!(permissions ?? []).includes("finance.view")) {
+      return apiError("Payment history access is restricted.", 403);
+    }
+
     const { data: sale, error: saleError } = await supabase.from("sales")
       .select("id")
       .eq("id", saleId.data)

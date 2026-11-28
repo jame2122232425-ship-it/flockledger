@@ -13,9 +13,6 @@ const querySchema = z.object({
   status: z.enum(["running", "closed"]).optional(),
 });
 
-const BATCH_FIELDS =
-  "batch_id, batch_code, batch_type, status, date_placed, date_sold_out, chicks_received, dead, culled, birds_sold, live_weight_sold_kg, avg_live_weight_sold_kg, feed_consumed_kg, revenue_kes, paid_kes, outstanding_kes, total_cost_kes, cost_per_bird_sold_kes, cost_per_kg_sold_kes, profit_kes, profit_per_bird_sold_kes, mortality_percent, livability_percent, age_days, epef, cash_in_kes, cash_out_kes, fcr";
-
 export async function GET(request: NextRequest) {
   const pagination = parsePagination(request.nextUrl.searchParams);
   if (!pagination) return apiError("Provide valid page and pageSize values (1-100).", 400);
@@ -33,10 +30,20 @@ export async function GET(request: NextRequest) {
     } = await supabase.auth.getUser();
     if (authError || !user) return apiError("Authentication required.", 401);
 
+    const { data: permissions, error: permissionsError } = await supabase.rpc(
+      "get_my_farm_permissions",
+      { p_farm_id: parsed.data.farmId },
+    );
+    if (permissionsError) {
+      if (permissionsError.code === "42501") return apiError("Farm membership required.", 403);
+      console.error("Failed to load dashboard permissions:", permissionsError.code);
+      return apiError("Could not load dashboard.", 500);
+    }
+    const canViewFinance = (permissions ?? []).includes("finance.view");
     const { from, to } = paginationRange(pagination);
     let batchQuery = supabase
       .from("batch_performance")
-      .select(BATCH_FIELDS, { count: "exact" })
+      .select("*", { count: "exact" })
       .eq("farm_id", parsed.data.farmId)
       .order("date_placed", { ascending: false })
       .order("batch_id", { ascending: false });
@@ -44,7 +51,7 @@ export async function GET(request: NextRequest) {
 
     const activeQuery = supabase
       .from("batch_performance")
-      .select(BATCH_FIELDS, { count: "exact" })
+      .select("*", { count: "exact" })
       .eq("farm_id", parsed.data.farmId)
       .eq("status", "running")
       .order("date_placed", { ascending: false })
@@ -54,7 +61,7 @@ export async function GET(request: NextRequest) {
       batchQuery.range(from, to),
       supabase
         .from("farm_dashboard")
-        .select("farm_id, farm_name, currency, timezone, opening_cash_balance_kes, batches_recorded, birds_placed, revenue_kes, total_expenses_kes, tagged_batch_profit_kes, untagged_expenses_kes, feed_stock_on_hand_kg, accounts_receivable_kes, cash_balance_kes")
+        .select("*")
         .eq("farm_id", parsed.data.farmId)
         .maybeSingle(),
       activeQuery,
@@ -67,12 +74,44 @@ export async function GET(request: NextRequest) {
       );
       return apiError("Could not load dashboard.", 500);
     }
+    const sanitizeOperationalBatch = (batch: NonNullable<typeof batches.data>[number]) => ({
+      batch_id: batch.batch_id,
+      batch_code: batch.batch_code,
+      batch_type: batch.batch_type,
+      status: batch.status,
+      date_placed: batch.date_placed,
+      date_sold_out: batch.date_sold_out,
+      chicks_received: batch.chicks_received,
+      dead: batch.dead,
+      culled: batch.culled,
+      birds_sold: batch.birds_sold,
+      live_weight_sold_kg: batch.live_weight_sold_kg,
+      avg_live_weight_sold_kg: batch.avg_live_weight_sold_kg,
+      feed_consumed_kg: batch.feed_consumed_kg,
+      mortality_percent: batch.mortality_percent,
+      livability_percent: batch.livability_percent,
+      age_days: batch.age_days,
+      epef: batch.epef,
+      fcr: batch.fcr,
+    });
     const allBatchCount = Number(summary.data?.batches_recorded ?? 0);
     const activeBatchCount = active.count ?? 0;
+    const dashboardSummary = summary.data && !canViewFinance
+      ? {
+        ...summary.data,
+        opening_cash_balance_kes: undefined,
+        revenue_kes: undefined,
+        total_expenses_kes: undefined,
+        tagged_batch_profit_kes: undefined,
+        untagged_expenses_kes: undefined,
+        accounts_receivable_kes: undefined,
+        cash_balance_kes: undefined,
+      }
+      : summary.data;
     return NextResponse.json({
-      data: batches.data,
-      summary: summary.data,
-      activeBatches: active.data,
+      data: canViewFinance ? batches.data : (batches.data ?? []).map(sanitizeOperationalBatch),
+      summary: dashboardSummary,
+      activeBatches: canViewFinance ? active.data : (active.data ?? []).map(sanitizeOperationalBatch),
       activeBatchCount,
       batchCounts: {
         all: allBatchCount,

@@ -510,6 +510,16 @@ tbody tr:hover { background: #fcfdfb; }
 .team-setup-credentials input { min-width: 0; height: 36px; padding: 0 9px; border: 1px solid #dfe5de; border-radius: 7px; background: #fff; color: #536159; font-size: 10px; }
 .team-setup-credentials button { height: 36px; padding: 0 9px; border: 1px solid #cfe0cb; border-radius: 7px; background: #fff; color: #47704f; font-size: 10px; font-weight: 700; }
 .team-setup-credentials p { margin: 0; color: #7d887f; font-size: 9px; }
+.team-delegation-options { display: grid; gap: 8px; padding: 12px 14px; }
+.team-delegation-options label { display: flex; min-height: 36px; align-items: center; gap: 9px; color: #536159; font-size: 11px; }
+.health-incident-form-card { margin-bottom: 18px; }
+.health-incident-items { display: grid; gap: 10px; }
+.health-incident-item { padding: 14px; border: 1px solid #e7ece5; border-radius: 10px; background: #fff; }
+.health-incident-meta { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.health-incident-meta strong { color: #34463a; font-size: 13px; }
+.health-incident-meta span, .health-incident-item small { color: #7c887e; font-size: 11px; }
+.health-incident-item p { margin: 10px 0 0; color: #556159; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.health-incident-item small { display: block; margin-top: 8px; }
 .staff-setup-page { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: linear-gradient(145deg, #edf4eb 0%, #f8fafc 100%); }
 .staff-setup-card { width: min(100%, 420px); padding: 32px; border: 1px solid #dde7dc; border-radius: 16px; background: #fff; box-shadow: 0 24px 70px rgba(35, 74, 45, .12); }
 .staff-setup-mark { display: grid; width: 43px; height: 43px; place-items: center; margin-bottom: 18px; border-radius: 11px; background: #15803d; color: #fff; font-size: 12px; font-weight: 800; }
