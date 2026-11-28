@@ -161,7 +161,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .add-farm-picker { color: #526357; font-size: 11px; font-weight: 650; text-align: left; }
 .farm-role { display: block; padding: 8px 0 0 49px; color: #9aa39c; font-size: 10px; text-transform: capitalize; }
 .mobile-farm-tools { display: none; }
-.side-nav { padding: 22px 0; }
+.side-nav {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #b7c4b8 transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  padding: 22px 0;
+}
+.side-nav::-webkit-scrollbar { width: 7px; }
+.side-nav::-webkit-scrollbar-thumb { border-radius: 7px; background: #b7c4b8; }
+.side-nav::-webkit-scrollbar-track { background: transparent; }
 .side-nav .nav-caption { margin-bottom: 9px; }
 .nav-link { display: flex; width: 100%; min-height: 40px; align-items: center; gap: 11px; margin: 3px 0; padding: 0 10px; color: #707b73; border: 0; border-radius: 8px; background: transparent; font-size: 12px; font-weight: 550; text-align: left; transition: color .15s, background .15s; }
 .nav-link:hover { color: #355d40; background: #f5f8f4; }
