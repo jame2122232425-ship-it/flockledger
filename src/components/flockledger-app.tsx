@@ -8,6 +8,7 @@ import { generateBatchCode, generateBatchCodeSuffix } from "@/lib/batches/batch-
 import { dailyRecordCreateSchema } from "@/lib/validation/daily-records";
 import { Icon } from "@/components/app-icon";
 import { Metric } from "@/components/metric-card";
+import { PasswordField } from "@/components/password-input";
 import { BottomTabs, MobileAccountMenu, type AppTab } from "@/components/mobile-navigation";
 import { RequestError, request } from "@/lib/client/request";
 import { formatKes, formatNumber, shortDate, todayInNairobi } from "@/lib/format";
@@ -238,14 +239,17 @@ function FarmPicker({
 
 export default function FlockLedgerApp({
   initialAuthMode = "sign-in",
+  initialAuthError = "",
 }: {
-  initialAuthMode?: "sign-in" | "sign-up";
+  initialAuthMode?: "sign-in" | "sign-up" | "forgot-password" | "reset-password";
+  initialAuthError?: string;
 }) {
   const router = useRouter();
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const isRecoveryMode = initialAuthMode === "forgot-password" || initialAuthMode === "reset-password";
+  const [authenticated, setAuthenticated] = useState<boolean | null>(isRecoveryMode ? false : null);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
-  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">(initialAuthMode);
-  const [authError, setAuthError] = useState("");
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up" | "forgot-password" | "reset-password">(initialAuthMode);
+  const [authError, setAuthError] = useState(initialAuthError);
   const [authNotice, setAuthNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [farms, setFarms] = useState<Farm[]>([]);
@@ -329,10 +333,10 @@ export default function FlockLedgerApp({
   }, [authNotice]);
 
   useEffect(() => {
-    if (!authError) return;
+    if (!authError || authError === initialAuthError) return;
     const timer = window.setTimeout(() => setAuthError(""), 5000);
     return () => window.clearTimeout(timer);
-  }, [authError]);
+  }, [authError, initialAuthError]);
 
   useEffect(() => {
     if (!dialogError) return;
@@ -541,6 +545,7 @@ export default function FlockLedgerApp({
   }, []);
 
   useEffect(() => {
+    if (isRecoveryMode) return;
     let active = true;
     request<{ data: { accepted: number } }>("/api/invitations/accept", { method: "POST" })
       .catch(() => ({ data: { accepted: 0 } }))
@@ -574,7 +579,7 @@ export default function FlockLedgerApp({
     return () => {
       active = false;
     };
-  }, []);
+  }, [isRecoveryMode]);
 
   useEffect(() => {
     if (farmId) window.localStorage.setItem(ACTIVE_FARM_STORAGE_KEY, farmId);
@@ -643,13 +648,38 @@ export default function FlockLedgerApp({
     setAuthError("");
     setAuthNotice("");
     const formData = new FormData(event.currentTarget);
-    const body: Record<string, string> = {
-      email: String(formData.get("email") ?? ""),
-      password: String(formData.get("password") ?? ""),
-    };
-    if (authMode === "sign-up") body.fullName = String(formData.get("fullName") ?? "");
 
     try {
+      if (authMode === "forgot-password") {
+        await request("/api/auth/password-reset", {
+          method: "POST",
+          body: JSON.stringify({ email: String(formData.get("email") ?? "") }),
+        });
+        setAuthNotice("If an account exists for that email, we'll send a password reset link.");
+        return;
+      }
+
+      if (authMode === "reset-password") {
+        const password = String(formData.get("password") ?? "");
+        const confirmPassword = String(formData.get("confirmPassword") ?? "");
+        if (password !== confirmPassword) {
+          setAuthError("The passwords do not match.");
+          return;
+        }
+        await request("/api/auth/password-update", {
+          method: "POST",
+          body: JSON.stringify({ password }),
+        });
+        router.replace("/app");
+        return;
+      }
+
+      const body: Record<string, string> = {
+        email: String(formData.get("email") ?? ""),
+        password: String(formData.get("password") ?? ""),
+      };
+      if (authMode === "sign-up") body.fullName = String(formData.get("fullName") ?? "");
+
       const result = await request<{ data: { emailConfirmationRequired?: boolean; requiresPasswordChange?: boolean } }>(
         `/api/auth/${authMode}`,
         { method: "POST", body: JSON.stringify(body) },
@@ -665,7 +695,11 @@ export default function FlockLedgerApp({
       }
       await loadFarms();
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Could not complete authentication.");
+      if (authMode === "reset-password" && error instanceof RequestError && error.status === 401) {
+        setAuthError("That reset link is invalid or expired. Request a new one.");
+      } else {
+        setAuthError(error instanceof Error ? error.message : "Could not complete authentication.");
+      }
     } finally {
       setBusy(false);
     }
@@ -979,7 +1013,7 @@ export default function FlockLedgerApp({
     );
   }
 
-  if (!authenticated) {
+  if (!authenticated || authMode === "forgot-password" || authMode === "reset-password") {
     return (
       <main className="auth-page">
         <section className="auth-story">
@@ -1002,12 +1036,32 @@ export default function FlockLedgerApp({
         </section>
         <section className="auth-panel">
           <div className="auth-form-wrap">
-            <p className="eyebrow">{authMode === "sign-in" ? "Welcome back" : "Get started"}</p>
-            <h2>{authMode === "sign-in" ? "Sign in to your farm" : "Create your account"}</h2>
+            <p className="eyebrow">
+              {authMode === "sign-in"
+                ? "Welcome back"
+                : authMode === "sign-up"
+                  ? "Get started"
+                  : authMode === "forgot-password"
+                    ? "Account recovery"
+                    : "Choose a new password"}
+            </p>
+            <h2>
+              {authMode === "sign-in"
+                ? "Sign in to your farm"
+                : authMode === "sign-up"
+                  ? "Create your account"
+                  : authMode === "forgot-password"
+                    ? "Forgot your password?"
+                    : "Reset your password"}
+            </h2>
             <p className="muted-copy">
               {authMode === "sign-in"
                 ? "Your records are right where you left them."
-                : "Set up your account to start managing your poultry records."}
+                : authMode === "sign-up"
+                  ? "Set up your account to start managing your poultry records."
+                  : authMode === "forgot-password"
+                    ? "Enter the email linked to your account and we’ll send recovery instructions if it’s registered."
+                    : "Enter and confirm a new password for your account."}
             </p>
             {authNotice && <div className="notice success-notice" role="status">{authNotice}</div>}
             {authError && <div className="notice error-notice" role="alert">{authError}</div>}
@@ -1018,31 +1072,58 @@ export default function FlockLedgerApp({
                   <input name="fullName" autoComplete="name" required maxLength={128} placeholder="Your name" />
                 </label>
               )}
-              <label>
-                Email address
-                <input name="email" type="email" autoComplete="email" required placeholder="you@example.com" />
-              </label>
-              <label>
-                Password
-                <input name="password" type="password" autoComplete={authMode === "sign-in" ? "current-password" : "new-password"} required minLength={authMode === "sign-up" ? 8 : 1} maxLength={128} placeholder={authMode === "sign-up" ? "At least 8 characters" : "Enter your password"} />
-              </label>
+              {authMode !== "reset-password" && (
+                <label>
+                  Email address
+                  <input name="email" type="email" autoComplete="email" required placeholder="you@example.com" />
+                </label>
+              )}
+              {(authMode === "sign-in" || authMode === "sign-up" || authMode === "reset-password") && (
+                <PasswordField
+                  label={authMode === "reset-password" ? "New password" : "Password"}
+                  name="password"
+                  autoComplete={authMode === "sign-in" ? "current-password" : "new-password"}
+                  required
+                  minLength={authMode === "sign-in" ? 1 : 8}
+                  maxLength={128}
+                  placeholder={authMode === "sign-in" ? "Enter your password" : "At least 8 characters"}
+                />
+              )}
+              {authMode === "reset-password" && (
+                <PasswordField label="Confirm new password" name="confirmPassword" autoComplete="new-password" required minLength={8} maxLength={128} />
+              )}
+              {authMode === "sign-in" && (
+                <p className="auth-forgot-link"><Link href="/forgot-password">Forgot password?</Link></p>
+              )}
               <button className="button button-primary button-wide" type="submit" disabled={busy}>
-                {busy ? "Please wait…" : authMode === "sign-in" ? "Sign in" : "Create account"}
+                {busy
+                  ? "Please wait…"
+                  : authMode === "sign-in"
+                    ? "Sign in"
+                    : authMode === "sign-up"
+                      ? "Create account"
+                      : authMode === "forgot-password"
+                        ? "Send reset link"
+                        : "Update password"}
               </button>
             </form>
-            <p className="auth-switch">
-              {authMode === "sign-in" ? "New to FlockLedger?" : "Already have an account?"}{" "}
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in");
-                  setAuthError("");
-                  setAuthNotice("");
-                }}
-              >
-                {authMode === "sign-in" ? "Create an account" : "Sign in"}
-              </button>
-            </p>
+            {authMode === "sign-in" || authMode === "sign-up" ? (
+              <p className="auth-switch">
+                {authMode === "sign-in" ? "New to FlockLedger?" : "Already have an account?"}{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in");
+                    setAuthError("");
+                    setAuthNotice("");
+                  }}
+                >
+                  {authMode === "sign-in" ? "Create an account" : "Sign in"}
+                </button>
+              </p>
+            ) : (
+              <p className="auth-switch"><Link href="/login">Back to sign in</Link></p>
+            )}
           </div>
           <p className="auth-legal">Your farm data is private and protected by role-based access.</p>
         </section>
@@ -1324,18 +1405,15 @@ export default function FlockLedgerApp({
                       Worker email
                       <input name="email" type="email" required autoComplete="email" placeholder="worker@example.com" />
                     </label>
-                    <label>
-                      Temporary password
-                      <input
-                        name="password"
-                        type="password"
-                        required
-                        minLength={8}
-                        maxLength={128}
-                        autoComplete="new-password"
-                        placeholder="At least 8 characters"
-                      />
-                    </label>
+                    <PasswordField
+                      label="Temporary password"
+                      name="password"
+                      required
+                      minLength={8}
+                      maxLength={128}
+                      autoComplete="new-password"
+                      placeholder="At least 8 characters"
+                    />
                     <label>
                       Role
                       <select name="role" defaultValue="attendant">

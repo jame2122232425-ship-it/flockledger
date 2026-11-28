@@ -2,6 +2,7 @@
 
 import { FormEvent, Suspense, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { PasswordField } from "@/components/password-input";
 
 function StaffSetupContent() {
   const searchParams = useSearchParams();
@@ -80,27 +81,18 @@ function StaffSetupContent() {
         {status === "ready" && (
           <form className="form-stack" onSubmit={handlePasswordChange}>
             {tokenHash && (
-              <label>
-                Temporary password
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  minLength={8}
-                  maxLength={128}
-                  required
-                  value={temporaryPassword}
-                  onChange={(event) => setTemporaryPassword(event.target.value)}
-                />
-              </label>
+              <PasswordField
+                label="Temporary password"
+                autoComplete="current-password"
+                minLength={8}
+                maxLength={128}
+                required
+                value={temporaryPassword}
+                onChange={(event) => setTemporaryPassword(event.target.value)}
+              />
             )}
-            <label>
-              New password
-              <input name="password" type="password" autoComplete="new-password" minLength={8} maxLength={128} required />
-            </label>
-            <label>
-              Confirm password
-              <input name="confirmation" type="password" autoComplete="new-password" minLength={8} maxLength={128} required />
-            </label>
+            <PasswordField label="New password" name="password" autoComplete="new-password" minLength={8} maxLength={128} required />
+            <PasswordField label="Confirm password" name="confirmation" autoComplete="new-password" minLength={8} maxLength={128} required />
             <button className="button button-primary button-wide" type="submit" disabled={busy}>
               {busy ? "Saving…" : "Set password and continue"}
             </button>

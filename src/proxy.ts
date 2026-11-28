@@ -46,7 +46,10 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  if (user.app_metadata?.force_password_change === true) {
+  if (
+    user.app_metadata?.force_password_change === true
+    && request.nextUrl.pathname !== "/api/auth/password-update"
+  ) {
     return NextResponse.json(
       { error: "Password setup is required before using this account." },
       { status: 403, headers: { "x-request-id": requestId } },

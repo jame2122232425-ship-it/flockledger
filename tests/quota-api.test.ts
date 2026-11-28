@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +41,8 @@ const farmId = "11111111-1111-4111-8111-111111111111";
 const authUserId = "22222222-2222-4222-8222-222222222222";
 const reservationId = "33333333-3333-4333-8333-333333333333";
 const invitationId = "44444444-4444-4444-8444-444444444444";
+const originalVercelEnv = process.env.VERCEL_ENV;
+const originalAppUrl = process.env.NEXT_PUBLIC_APP_URL;
 
 function batchRequest() {
   return new NextRequest("https://flockledger.test/api/batches", {
@@ -73,6 +75,8 @@ function farmSubscriptionRequest(method = "GET") {
 }
 
 beforeEach(() => {
+  process.env.VERCEL_ENV = "preview";
+  process.env.NEXT_PUBLIC_APP_URL = "https://flockledger.test";
   vi.clearAllMocks();
   mocks.membershipQuery.select.mockReturnThis();
   mocks.membershipQuery.eq.mockReturnThis();
@@ -120,6 +124,14 @@ beforeEach(() => {
     }
     return { data: true, error: null };
   });
+});
+
+afterEach(() => {
+  if (originalVercelEnv === undefined) delete process.env.VERCEL_ENV;
+  else process.env.VERCEL_ENV = originalVercelEnv;
+
+  if (originalAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+  else process.env.NEXT_PUBLIC_APP_URL = originalAppUrl;
 });
 
 describe("quota-protected API writes", () => {

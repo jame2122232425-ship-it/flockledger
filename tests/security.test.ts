@@ -27,6 +27,8 @@ describe("security helpers", () => {
     expect(isProtectedApiPath("/api/farms/farm-id/subscription")).toBe(true);
     expect(isProtectedApiPath("/api/farms/farm-id/subscription/usage")).toBe(true);
     expect(isProtectedApiPath("/api/auth/sign-in")).toBe(false);
+    expect(isProtectedApiPath("/api/auth/password-reset")).toBe(false);
+    expect(isProtectedApiPath("/api/auth/password-update")).toBe(true);
     expect(isProtectedApiPath("/api/staff/setup/password")).toBe(false);
   });
 

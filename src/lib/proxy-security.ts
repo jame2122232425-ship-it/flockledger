@@ -27,6 +27,7 @@ export function isProtectedApiPath(pathname: string) {
     && ![
       "/api/auth/sign-in",
       "/api/auth/sign-up",
+      "/api/auth/password-reset",
       "/api/auth/sign-out",
       "/api/auth/session",
       "/api/staff/setup/verify",

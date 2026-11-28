@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiError, isUuid } from "@/lib/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getAppUrl } from "@/lib/app-url";
 import { createHash, randomBytes } from "node:crypto";
 import {
   attemptKey,
@@ -115,6 +116,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
   const parsed = invitationSchema.safeParse(body);
   if (!parsed.success) return apiError("Provide a valid email and staff role.", 400);
+  const appUrl = getAppUrl();
+  if (!appUrl) return apiError("Application URL is not configured.", 503);
 
   try {
     const supabase = await createSupabaseServerClient();
@@ -235,8 +238,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const setupToken = randomBytes(32).toString("base64url");
     const setupTokenHash = createHash("sha256").update(setupToken).digest("hex");
 
-    const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").trim().replace(/\/$/, "");
-    const setupUrl = `${appUrl}/staff/setup?token_hash=${encodeURIComponent(setupToken)}&email=${encodeURIComponent(parsed.data.email)}`;
+    const setupUrl = new URL("/staff/setup", appUrl);
+    setupUrl.searchParams.set("token_hash", setupToken);
+    setupUrl.searchParams.set("email", parsed.data.email);
     let finalization: Awaited<ReturnType<typeof admin.rpc>>;
     try {
       finalization = await admin.rpc("finalize_farm_staff_invitation", {
@@ -297,7 +301,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({
       data: {
         ...invitation.data,
-        setupUrl,
+        setupUrl: setupUrl.toString(),
         temporaryPassword: tempPassword,
       },
     }, { status: 201 });

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { signUpSchema } from "../src/lib/validation/auth";
+import {
+  passwordResetRequestSchema,
+  passwordUpdateSchema,
+  signUpSchema,
+} from "../src/lib/validation/auth";
 
 describe("signUpSchema", () => {
   const account = {
@@ -13,5 +17,17 @@ describe("signUpSchema", () => {
 
   it("rejects passwords shorter than 8 characters", () => {
     expect(signUpSchema.safeParse({ ...account, password: "bird123" }).success).toBe(false);
+  });
+});
+
+describe("password recovery schemas", () => {
+  it("accepts a valid recovery email and an 8-character replacement password", () => {
+    expect(passwordResetRequestSchema.safeParse({ email: "farmer@example.com" }).success).toBe(true);
+    expect(passwordUpdateSchema.safeParse({ password: "poultry8" }).success).toBe(true);
+  });
+
+  it("rejects malformed emails and short replacement passwords", () => {
+    expect(passwordResetRequestSchema.safeParse({ email: "not-an-email" }).success).toBe(false);
+    expect(passwordUpdateSchema.safeParse({ password: "bird123" }).success).toBe(false);
   });
 });

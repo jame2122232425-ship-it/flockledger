@@ -16,6 +16,9 @@ Supabase backup/PITR plan has not yet been confirmed.
   production service-role key or production database URL.
 - Configure `NEXT_PUBLIC_APP_URL` to the canonical production HTTPS origin and
   register the production and preview callback/redirect URLs in Supabase Auth.
+  Vercel Production invitation and password-recovery links use
+  `https://flockledgerupdated.vercel.app`; Preview and local links use their
+  configured `NEXT_PUBLIC_APP_URL`.
 - Review which branch Vercel treats as Production and protect that branch with
   the CI check before enabling automatic production deployments.
 - The repository's GitHub Actions workflow validates code but does not deploy.
@@ -49,8 +52,9 @@ Supabase backup/PITR plan has not yet been confirmed.
   (or a Send Email hook) in Supabase and raise the email limit under
   **Authentication > Rate Limits** before launch.
 - Configure confirmation and password-reset templates, set the Site URL to the
-  canonical `NEXT_PUBLIC_APP_URL`, register the sign-in/sign-up/callback
-  redirect URLs in the allowlist, and enable abuse protection. Without a
+  canonical `NEXT_PUBLIC_APP_URL`, register the sign-in/sign-up and
+  `/auth/callback?flow=recovery` redirect URL in the allowlist, and enable abuse
+  protection. Without a
   configured sender, `/api/auth/sign-up` returns a generic
   "Could not create account." response; inspect the Vercel function logs for
   `Supabase sign-up failed` to see the status, error code, and request ID.
