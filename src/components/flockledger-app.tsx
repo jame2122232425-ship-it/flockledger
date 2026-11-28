@@ -418,6 +418,7 @@ export default function FlockLedgerApp({
   const canRecordPayments = farmIsActive && hasPermission("finance.payments.record");
   const canViewHealth = hasPermission("health.view");
   const canCoordinateHealth = farmIsActive && hasPermission("health.coordinate");
+  const pendingInvitations = teamInvitations.filter((invitation) => invitation.status === "pending");
   const batchNames = useMemo(() => new Map([
     ...batches.map((batch) => [batch.batch_id, batch.batch_code] as const),
     ...farmBatches.map((batch) => [batch.id, batch.batch_code] as const),
@@ -1432,11 +1433,11 @@ export default function FlockLedgerApp({
                   )}
                 </section>
 
-                {teamInvitations.length > 0 && (
+                {pendingInvitations.length > 0 && (
                   <section className="team-section">
-                    <div className="team-section-heading"><h3>Pending invitations</h3><span>{teamInvitations.filter((item) => item.status === "pending").length}</span></div>
+                    <div className="team-section-heading"><h3>Pending invitations</h3><span>{pendingInvitations.length}</span></div>
                     <div className="team-list">
-                      {teamInvitations.map((invitation) => (
+                      {pendingInvitations.map((invitation) => (
                         <div className="team-row" key={invitation.id}>
                           <div><strong>{invitation.email}</strong><small>{invitation.role === "attendant" ? "Worker (Attendant)" : invitation.role}</small></div>
                           <span className={`team-status ${invitation.status}`}>{invitation.status}</span>
