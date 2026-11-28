@@ -1607,10 +1607,59 @@ table,
   .mobile-list { display: flex; flex-direction: column; padding: 10px; }
   .table-scroll-hint { display: block; margin: 0; padding: 0 16px 10px; color: #5d7063; font-size: 11px; }
 
-  .auth-story { min-height: 0; padding: 14px 20px; }
+  .auth-page {
+    display: flex;
+    min-height: 100dvh;
+    flex-direction: column;
+  }
+  .auth-story {
+    min-height: 64px;
+    flex: 0 0 64px;
+    justify-content: center;
+    padding: max(12px, env(safe-area-inset-top)) 20px 12px;
+  }
+  .brand-lockup {
+    min-height: 44px;
+    align-items: center;
+  }
   .auth-story-copy, .auth-footer { display: none; }
-  .auth-panel { min-height: auto; padding: 24px 20px 20px; }
-  .auth-form-wrap h2 { font-size: 24px; }
+  .auth-panel {
+    min-height: 0;
+    flex: 1 1 auto;
+    justify-content: flex-start;
+    align-items: stretch;
+    padding: 28px 20px calc(20px + env(safe-area-inset-bottom));
+  }
+  .auth-form-wrap {
+    width: 100%;
+    max-width: 440px;
+    margin: 0 auto;
+  }
+  .auth-form-wrap h2 { margin: 0; font-size: 26px; line-height: 1.15; }
+  .auth-form-wrap .eyebrow { margin-bottom: 8px; }
+  .muted-copy { margin: 8px 0 22px; line-height: 1.5; }
+  .auth-form { gap: 14px !important; }
+  .auth-form label { font-size: 13px; }
+  .auth-form input {
+    min-height: 48px;
+    padding: 11px 13px;
+    border-radius: 9px;
+    font-size: 16px;
+  }
+  .auth-form .button-wide {
+    min-height: 48px;
+    margin-top: 2px;
+    font-size: 14px;
+  }
+  .auth-switch { min-height: 44px; margin: 12px 0 0; padding: 10px 0; line-height: 1.6; }
+  .auth-switch button { min-height: 44px; padding: 10px 6px; font-size: 13px; }
+  .auth-legal {
+    width: 100%;
+    max-width: 440px;
+    margin: auto auto 0;
+    padding: 28px 0 0;
+    text-align: center;
+  }
   .pricing-hero h1,
   .marketing-page-hero-blog h1,
   .marketing-page-hero-guides h1,
@@ -1637,6 +1686,54 @@ table,
   .team-setup-credentials input,
   .team-setup-credentials button { width: 100%; min-height: 44px; }
   .team-setup-credentials label > div { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 430px) {
+  .auth-story {
+    min-height: 60px;
+    flex-basis: 60px;
+    padding-inline: 16px;
+  }
+  .brand-lockup { font-size: 17px; }
+  .brand-mark { width: 36px; height: 36px; border-radius: 10px; }
+  .auth-panel { padding: 22px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .auth-form-wrap h2 { font-size: 24px; }
+  .muted-copy { margin-bottom: 18px; font-size: 12px; }
+  .auth-form { gap: 12px !important; }
+  .auth-form label { gap: 6px; }
+  .auth-legal { padding-top: 20px; }
+  .staff-setup-page {
+    align-items: start;
+    min-height: 100dvh;
+    padding: max(12px, env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
+  }
+  .staff-setup-card {
+    margin: 0;
+    width: 100%;
+  }
+  .staff-setup-card .form-stack input { min-height: 48px; }
+  .staff-setup-card .button { min-height: 48px; }
+}
+
+@media (max-width: 900px) and (min-width: 721px) {
+  .auth-page {
+    grid-template-columns: minmax(300px, .78fr) minmax(420px, 1.22fr);
+  }
+  .auth-story {
+    min-height: 100dvh;
+    padding: 28px clamp(24px, 4vw, 44px);
+  }
+  .auth-story-copy { padding: 36px 0; }
+  .auth-story h1 { font-size: clamp(38px, 5vw, 48px); letter-spacing: -2.4px; }
+  .story-description { font-size: 13px; }
+  .story-note { display: none; }
+  .auth-panel {
+    min-height: 100dvh;
+    padding: 36px clamp(28px, 5vw, 56px) 20px;
+  }
+  .auth-form-wrap { max-width: 410px; }
+  .auth-form input { min-height: 48px; font-size: 16px; }
+  .auth-form .button-wide { min-height: 48px; }
 }
 
 @media (max-width: 430px) {
